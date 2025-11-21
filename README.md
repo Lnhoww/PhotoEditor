@@ -18,10 +18,8 @@ PhotoEditor 是一款基于 Jetpack Compose 构建的现代化安卓图像编辑
 ## 📸 核心功能截图
 
 *   **首页概览**
-    ![f6befd870a6c0a73591585bad86f2c18.jpg](../../../xwechat_files/wxid_58kriagn6oho12_d6a1/temp/RWTemp/2025-11/6d69194cb70efb9dc14ec3fefa72c7b3/f6befd870a6c0a73591585bad86f2c18.jpg)
 
 *   **相册页概览**
- ![8950a512760d253aaa2bd09ea6721578.jpg](../../../xwechat_files/wxid_58kriagn6oho12_d6a1/temp/RWTemp/2025-11/6d69194cb70efb9dc14ec3fefa72c7b3/8950a512760d253aaa2bd09ea6721578.jpg)
    
     
 
