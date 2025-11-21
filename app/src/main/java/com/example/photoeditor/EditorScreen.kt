@@ -1,6 +1,7 @@
 package com.example.photoeditor
 
 import android.net.Uri
+import android.opengl.GLSurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,12 +16,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.photoeditor.ui.theme.PhotoEditorTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,6 +33,9 @@ fun EditorScreen(
     // State for selected tools
     var selectedPrimaryTool by remember { mutableStateOf("一键出片") }
     var selectedMainTab by remember { mutableStateOf("调节") }
+
+    val context = LocalContext.current
+    val imageRenderer = remember { ImageRenderer(context) }
 
     Scaffold(
         topBar = {
@@ -66,12 +70,19 @@ fun EditorScreen(
                 .fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            // Middle canvas area
-            AsyncImage(
-                model = imageUri,
-                contentDescription = "Image to edit",
+            // Middle canvas area using AndroidView to host GLSurfaceView
+            AndroidView(
+                factory = { ctx ->
+                    GLSurfaceView(ctx).apply {
+                        setEGLContextClientVersion(2)
+                        setRenderer(imageRenderer)
+                        renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
+                update = { view ->
+                    imageRenderer.setImageUri(imageUri, view)
+                }
             )
         }
     }
@@ -195,6 +206,7 @@ data class EditorTool(val name: String, val icon: ImageVector)
 fun EditorScreenPreview() {
     PhotoEditorTheme {
         // Use a placeholder URI for the preview
+        // Note: The GLSurfaceView will appear as a black box in the preview
         EditorScreen(imageUri = Uri.EMPTY, onBack = {})
     }
 }
