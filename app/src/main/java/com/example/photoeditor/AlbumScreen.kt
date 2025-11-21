@@ -1,22 +1,13 @@
 package com.example.photoeditor
 
 import android.Manifest
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -24,23 +15,17 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Grid4x4
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Image // MODIFIED: Removed alias, directly importing Image
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +45,7 @@ import com.example.photoeditor.ui.theme.PhotoEditorTheme
 @Composable
 fun AlbumScreen(
     onBack: () -> Unit, // Callback for back navigation
+    onImageClick: (Uri) -> Unit, // Callback for when an image is clicked
     viewModel: MainViewModel = viewModel()
 ) {
     val mediaUris by viewModel.mediaUris.collectAsState()
@@ -68,7 +54,7 @@ fun AlbumScreen(
     // State for filtering options
     var selectedFilter by remember { mutableStateOf("图片") }
     val filters = listOf(
-        FilterOption("图片", Icons.Default.Image), // MODIFIED: Directly using Icons.Default.Image
+        FilterOption("图片", Icons.Default.Image),
         FilterOption("拼图", Icons.Default.Grid4x4),
         FilterOption("批量修图", Icons.Default.Layers)
     )
@@ -104,7 +90,7 @@ fun AlbumScreen(
                 title = { Text("本地相册", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -159,7 +145,8 @@ fun AlbumScreen(
                         modifier = Modifier
                             .padding(2.dp)
                             .aspectRatio(1f)
-                            .clip(RoundedCornerShape(4.dp)),
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onImageClick(uri) }, // Added clickable modifier
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -195,6 +182,6 @@ data class FilterOption(val name: String, val icon: ImageVector)
 @Composable
 fun AlbumScreenPreview() {
     PhotoEditorTheme {
-        AlbumScreen(onBack = { /* Do nothing for preview */ })
+        AlbumScreen(onBack = { }, onImageClick = {}) // Provide empty lambdas for preview
     }
 }
