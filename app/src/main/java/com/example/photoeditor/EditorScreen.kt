@@ -28,7 +28,8 @@ import com.example.photoeditor.ui.theme.PhotoEditorTheme
 @Composable
 fun EditorScreen(
     imageUri: Uri,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToCrop: (Uri) -> Unit // Added navigation callback for crop
 ) {
     // State for selected tools
     var selectedPrimaryTool by remember { mutableStateOf("一键出片") }
@@ -58,7 +59,12 @@ fun EditorScreen(
             EditorBottomBar(
                 selectedPrimaryTool = selectedPrimaryTool,
                 selectedMainTab = selectedMainTab,
-                onPrimaryToolClick = { selectedPrimaryTool = it },
+                onPrimaryToolClick = { toolName ->
+                    selectedPrimaryTool = toolName
+                    if (toolName == "构图") {
+                        onNavigateToCrop(imageUri) // Navigate to CropScreen
+                    }
+                },
                 onMainTabClick = { selectedMainTab = it }
             )
         },
@@ -206,7 +212,6 @@ data class EditorTool(val name: String, val icon: ImageVector)
 fun EditorScreenPreview() {
     PhotoEditorTheme {
         // Use a placeholder URI for the preview
-        // Note: The GLSurfaceView will appear as a black box in the preview
-        EditorScreen(imageUri = Uri.EMPTY, onBack = {})
+        EditorScreen(imageUri = Uri.EMPTY, onBack = {}, onNavigateToCrop = {})
     }
 }
