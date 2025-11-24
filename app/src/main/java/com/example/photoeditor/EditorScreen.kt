@@ -33,17 +33,25 @@ fun EditorScreen(
     onBack: () -> Unit,
     onNavigateToCrop: (Uri) -> Unit // Added navigation callback for crop
 ) {
-    // State for selected tools - Changed initial value to empty string
-    var selectedPrimaryTool by remember { mutableStateOf("") }
-    var selectedMainTab by remember { mutableStateOf("调节") }
+    // State for selected tools
+    val selectedPrimaryToolState = remember { mutableStateOf("") }
+    var selectedPrimaryTool by selectedPrimaryToolState
+
+    val selectedMainTabState = remember { mutableStateOf("调节") }
+    var selectedMainTab by selectedMainTabState
 
     val context = LocalContext.current
     val imageRenderer = remember { ImageRenderer(context) }
 
     // Keep track of total scale and translation for gestures
-    var scale by remember { mutableStateOf(1f) }
-    var offsetX by remember { mutableStateOf(0f) }
-    var offsetY by remember { mutableStateOf(0f) }
+    val scaleState = remember { mutableFloatStateOf(1f) }
+    var scale by scaleState
+
+    val offsetXState = remember { mutableFloatStateOf(0f) }
+    var offsetX by offsetXState
+
+    val offsetYState = remember { mutableFloatStateOf(0f) }
+    var offsetY by offsetYState
 
     Scaffold(
         topBar = {
@@ -88,40 +96,33 @@ fun EditorScreen(
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
-                .pointerInput(Unit) { // 'Unit' means the gesture detector won't restart unnecessarily
+                .pointerInput(Unit) {
                     detectTransformGestures {
                         _, pan, zoom, _ ->
                         scale *= zoom
                         offsetX += pan.x
                         offsetY += pan.y
                         
-                        // Clamp scale to reasonable values
-                        scale = scale.coerceIn(0.5f, 5.0f) // Example: Min 0.5x, Max 5x zoom
+                        scale = scale.coerceIn(0.5f, 5.0f)
 
-                        // Pass updated values to the renderer
                         imageRenderer.setScale(scale)
-                        // Normalize pan values to OpenGL's -1.0 to 1.0 coordinate system
-                        // This needs to be relative to the actual GLSurfaceView size
-                        imageRenderer.setTranslation(offsetX / size.width * 2f, -offsetY / size.height * 2f) // Y-axis inverted for OpenGL
+                        imageRenderer.setTranslation(offsetX / size.width * 2f, -offsetY / size.height * 2f)
                     }
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Middle canvas area using AndroidView to host GLSurfaceView
             AndroidView(
                 factory = { ctx ->
                     GLSurfaceView(ctx).apply {
                         setEGLContextClientVersion(2)
                         setRenderer(imageRenderer)
-                        renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+                        // Start with continuous rendering to ensure the first frame is drawn
+                        renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
                     imageRenderer.setImageUri(imageUri, view)
-                    // Also re-apply current transformations when view updates
-                    imageRenderer.setScale(scale)
-                    imageRenderer.setTranslation(offsetX / view.width * 2f, -offsetY / view.height * 2f) // Re-normalize pan
                 }
             )
         }
@@ -193,7 +194,7 @@ fun EditorToolButton(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val contentColor = if (isSelected) Color(0xFF66FF66) else Color.White // A bright green for selection
+    val contentColor = if (isSelected) Color(0xFF66FF66) else Color.White
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -233,7 +234,7 @@ fun EditorTabButton(
                 modifier = Modifier
                     .width(24.dp)
                     .height(3.dp)
-                    .background(Color(0xFF66FF66)) // A bright green for selection
+                    .background(Color(0xFF66FF66))
             )
         }
     }
@@ -245,7 +246,6 @@ data class EditorTool(val name: String, val icon: ImageVector)
 @Composable
 fun EditorScreenPreview() {
     PhotoEditorTheme {
-        // Use a placeholder URI for the preview
         EditorScreen(imageUri = Uri.EMPTY, onBack = {}, onNavigateToCrop = {})
     }
 }
