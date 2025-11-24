@@ -12,16 +12,20 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.max
 import kotlin.math.min
 
 class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
+    // Modified Vertex Shader to include scale and translate uniforms
     private val vertexShaderCode =
         "attribute vec4 vPosition;" +
         "attribute vec2 vTexCoord;" +
+        "uniform float uScale;" +      // New: Uniform for scaling
+        "uniform vec2 uTranslate;" +   // New: Uniform for translation
         "varying vec2 TexCoord;" +
         "void main() {" +
-        "  gl_Position = vPosition;" +
+        "  gl_Position = vec4(vPosition.xy * uScale + uTranslate, vPosition.zw);" + // Apply scale and translate
         "  TexCoord = vTexCoord;" +
         "}"
 
@@ -54,6 +58,10 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         1.0f, 0.0f  // Top Right
     )
 
+    @Volatile var currentScale = 1.0f
+    @Volatile var currentTranslateX = 0.0f
+    @Volatile var currentTranslateY = 0.0f
+
     private var imageUri: Uri? = null
     private var surfaceView: GLSurfaceView? = null
 
@@ -66,8 +74,23 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
     fun setImageUri(uri: Uri, glSurfaceView: GLSurfaceView) {
         this.imageUri = uri
         this.surfaceView = glSurfaceView
+        // Reset transformations for new image
+        currentScale = 1.0f
+        currentTranslateX = 0.0f
+        currentTranslateY = 0.0f
         // Request a render to load the new texture
         glSurfaceView.requestRender()
+    }
+
+    fun setScale(scale: Float) {
+        currentScale = scale
+        surfaceView?.requestRender()
+    }
+
+    fun setTranslation(x: Float, y: Float) {
+        currentTranslateX = x
+        currentTranslateY = y
+        surfaceView?.requestRender()
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -120,10 +143,9 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         GLES20.glUseProgram(program)
         
-        // --- Calculate new vertices to maintain aspect ratio ---
+        // Calculate base vertices to maintain aspect ratio (without gesture transforms yet)
         val adjustedVertices = calculateAdjustedVertices()
         vertexBuffer.put(adjustedVertices).position(0)
-        // --- End of calculation ---
 
         // Get handle to vertex shader's vPosition member
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
@@ -135,9 +157,15 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glEnableVertexAttribArray(texCoordHandle)
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
         
-        // Get handle to fragment shader's uTexture member
+        // Get handles to uniforms
+        val scaleHandle = GLES20.glGetUniformLocation(program, "uScale")
+        val translateHandle = GLES20.glGetUniformLocation(program, "uTranslate")
         val textureHandle = GLES20.glGetUniformLocation(program, "uTexture")
         
+        // Pass uniform values
+        GLES20.glUniform1f(scaleHandle, currentScale)
+        GLES20.glUniform2f(translateHandle, currentTranslateX, currentTranslateY)
+
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
         GLES20.glUniform1i(textureHandle, 0)
@@ -168,13 +196,14 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         var scaleY = 1.0f
 
         if (imageRatio > viewportRatio) {
-            // Image is wider than the viewport, scale height down
+            // Image is wider than the viewport, scale height down to fit
             scaleY = viewportRatio / imageRatio
         } else {
-            // Image is taller than or equal to the viewport, scale width down
+            // Image is taller than or equal to the viewport, scale width down to fit
             scaleX = imageRatio / viewportRatio
         }
 
+        // These base vertices maintain aspect ratio, actual gesture transforms are in shader
         return floatArrayOf(
             -scaleX, -scaleY,  // Bottom Left
              scaleX, -scaleY,  // Bottom Right
