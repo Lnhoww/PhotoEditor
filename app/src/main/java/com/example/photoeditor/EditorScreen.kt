@@ -4,6 +4,7 @@ import android.net.Uri
 import android.opengl.GLSurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -31,12 +33,17 @@ fun EditorScreen(
     onBack: () -> Unit,
     onNavigateToCrop: (Uri) -> Unit // Added navigation callback for crop
 ) {
-    // State for selected tools
-    var selectedPrimaryTool by remember { mutableStateOf("一键出片") }
+    // State for selected tools - Changed initial value to empty string
+    var selectedPrimaryTool by remember { mutableStateOf("") }
     var selectedMainTab by remember { mutableStateOf("调节") }
 
     val context = LocalContext.current
     val imageRenderer = remember { ImageRenderer(context) }
+
+    // Keep track of total scale and translation for gestures
+    var scale by remember { mutableStateOf(1f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
 
     Scaffold(
         topBar = {
@@ -63,6 +70,13 @@ fun EditorScreen(
                     selectedPrimaryTool = toolName
                     if (toolName == "构图") {
                         onNavigateToCrop(imageUri) // Navigate to CropScreen
+                    } else {
+                        // Reset gestures when changing tools, if desired
+                        scale = 1f
+                        offsetX = 0f
+                        offsetY = 0f
+                        imageRenderer.setScale(1f)
+                        imageRenderer.setTranslation(0f, 0f)
                     }
                 },
                 onMainTabClick = { selectedMainTab = it }
@@ -70,10 +84,27 @@ fun EditorScreen(
         },
         containerColor = Color.Black
     ) { innerPadding ->
-        Box(
+        Box( // This Box will handle the gestures
             modifier = Modifier
                 .padding(innerPadding)
-                .fillMaxSize(),
+                .fillMaxSize()
+                .pointerInput(Unit) { // 'Unit' means the gesture detector won't restart unnecessarily
+                    detectTransformGestures {
+                        _, pan, zoom, _ ->
+                        scale *= zoom
+                        offsetX += pan.x
+                        offsetY += pan.y
+                        
+                        // Clamp scale to reasonable values
+                        scale = scale.coerceIn(0.5f, 5.0f) // Example: Min 0.5x, Max 5x zoom
+
+                        // Pass updated values to the renderer
+                        imageRenderer.setScale(scale)
+                        // Normalize pan values to OpenGL's -1.0 to 1.0 coordinate system
+                        // This needs to be relative to the actual GLSurfaceView size
+                        imageRenderer.setTranslation(offsetX / size.width * 2f, -offsetY / size.height * 2f) // Y-axis inverted for OpenGL
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
             // Middle canvas area using AndroidView to host GLSurfaceView
@@ -88,6 +119,9 @@ fun EditorScreen(
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
                     imageRenderer.setImageUri(imageUri, view)
+                    // Also re-apply current transformations when view updates
+                    imageRenderer.setScale(scale)
+                    imageRenderer.setTranslation(offsetX / view.width * 2f, -offsetY / view.height * 2f) // Re-normalize pan
                 }
             )
         }
