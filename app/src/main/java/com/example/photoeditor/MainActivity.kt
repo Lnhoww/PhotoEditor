@@ -1,5 +1,6 @@
 package com.example.photoeditor
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,16 +14,17 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.* // Import all layout modifiers
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.* // Added for remember and mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect // Import Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,7 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.GifDecoder
@@ -43,6 +44,8 @@ import com.example.photoeditor.ui.theme.PhotoEditorTheme
 sealed class Screen {
     object Home : Screen()
     object Album : Screen()
+    data class Editor(val imageUri: Uri, val cropRect: Rect? = null) : Screen() // Modified: Added optional cropRect
+    data class Crop(val imageUri: Uri, val initialCropRect: Rect) : Screen() // Modified: Added initialCropRect
 }
 
 class MainActivity : ComponentActivity() {
@@ -57,7 +60,27 @@ class MainActivity : ComponentActivity() {
                 // Display the appropriate screen based on currentScreen state
                 when (currentScreen) {
                     is Screen.Home -> HomeScreen(onNavigateToAlbum = { currentScreen = Screen.Album })
-                    is Screen.Album -> AlbumScreen(onBack = { currentScreen = Screen.Home })
+                    is Screen.Album -> AlbumScreen(
+                        onBack = { currentScreen = Screen.Home },
+                        onImageClick = { uri -> currentScreen = Screen.Editor(uri) }
+                    )
+                    is Screen.Editor -> {
+                        val editorScreen = currentScreen as Screen.Editor
+                        EditorScreen(
+                            imageUri = editorScreen.imageUri,
+                            initialCropRect = editorScreen.cropRect,
+                            onBack = { currentScreen = Screen.Album },
+                            onNavigateToCrop = { uri, currentRect -> currentScreen = Screen.Crop(uri, currentRect) }
+                        )
+                    }
+                    is Screen.Crop -> {
+                        val cropScreen = currentScreen as Screen.Crop
+                        CropScreen(
+                            imageUri = cropScreen.imageUri,
+                            onBack = { currentScreen = Screen.Editor(cropScreen.imageUri, cropScreen.initialCropRect) },
+                            onConfirm = { croppedRect: Rect -> currentScreen = Screen.Editor(cropScreen.imageUri, croppedRect) } // Corrected: Specify type for croppedRect
+                        )
+                    }
                 }
             }
         }
@@ -65,7 +88,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun HomeScreen(viewModel: MainViewModel = viewModel(), onNavigateToAlbum: () -> Unit) {
+fun HomeScreen(onNavigateToAlbum: () -> Unit) {
     val context = LocalContext.current
 
     val imageLoader = ImageLoader.Builder(context)
@@ -73,7 +96,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel(), onNavigateToAlbum: () -> 
         .build()
 
     // State for bottom navigation selection
-    var selectedItem by remember { mutableStateOf(0) }
+    var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf("修图", "灵感", "我的")
     val icons = listOf(Icons.Default.PhotoCamera, Icons.Default.Lightbulb, Icons.Default.Person)
 
@@ -184,8 +207,6 @@ fun HomeScreen(viewModel: MainViewModel = viewModel(), onNavigateToAlbum: () -> 
             // Spacer to push future content down
             Spacer(modifier = Modifier.height(24.dp))
 
-            // The "为你推荐" section will be added here in the future
-            // (Old media grid will be replaced by a horizontal scrollable list of recommendations)
         }
     }
 }
