@@ -41,7 +41,7 @@ enum class DragHandle {
 fun CropScreen(
     imageUri: Uri,
     onBack: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: (Rect) -> Unit // MODIFIED: onConfirm now accepts a Rect
 ) {
     val context = LocalContext.current
     val imageRenderer = remember { ImageRenderer(context) }
@@ -213,7 +213,7 @@ fun CropScreen(
                 selectedFunction = selectedFunction,
                 onFunctionSelected = { selectedFunction = it },
                 onCancel = onBack,
-                onConfirm = onConfirm
+                onConfirm = { onConfirm(cropRect) } // MODIFIED: Pass cropRect on confirm
             )
         }
     }
@@ -294,6 +294,6 @@ fun CropBottomBar(
 @Composable
 fun CropScreenPreview() {
     PhotoEditorTheme {
-        CropScreen(imageUri = Uri.EMPTY, onBack = {}, onConfirm = {})
+        CropScreen(imageUri = Uri.EMPTY, onBack = {}, onConfirm = { _ ->})
     }
 }
