@@ -40,8 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.photoeditor.ui.theme.PhotoEditorTheme
-// REMOVED: Unused imports import kotlin.math.max, import kotlin.math.min
-// REMOVED: Unused import import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,10 +115,21 @@ fun EditorScreen(
                     }
                 },
                 actions = {
-                    Button(onClick = { 
-                        imageRenderer.surfaceView?.queueEvent { 
-                            val bitmap = imageRenderer.captureRenderedBitmap()
-                            if (bitmap != null) {
+                    Button(onClick = {
+                        // --- 修改开始：使用 BitmapUtils 进行原生导出 ---
+                        coroutineScope.launch {
+                            // 显示保存中提示（可选）
+                            // snackbarHostState.showSnackbar("正在保存...")
+
+                            val bitmapToSave = if (appliedCropRect != null) {
+                                // 1. 如果有裁剪框，使用原生裁剪算法
+                                BitmapUtils.cropImage(context, imageUri, appliedCropRect!!)
+                            } else {
+                                // 2. 如果没有裁剪，加载原图
+                                BitmapUtils.loadBitmapWithRotation(context, imageUri)
+                            }
+
+                            if (bitmapToSave != null) {
                                 val fileName = "PhotoEditor_" + UUID.randomUUID().toString() + ".png"
                                 val imageCollection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
                                 val contentValues = ContentValues().apply {
@@ -129,25 +140,30 @@ fun EditorScreen(
                                 }
 
                                 try {
-                                    val resolver = context.contentResolver
-                                    val imageUri = resolver.insert(imageCollection, contentValues)
-                                    if (imageUri != null) {
-                                        val outputStream: OutputStream? = resolver.openOutputStream(imageUri)
-                                        outputStream?.use { os ->
-                                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
-                                            coroutineScope.launch { snackbarHostState.showSnackbar("图片已保存到相册") }
-                                            Unit
+                                    // 3. 执行 IO 保存操作
+                                    withContext(Dispatchers.IO) {
+                                        val resolver = context.contentResolver
+                                        val uri = resolver.insert(imageCollection, contentValues)
+                                        if (uri != null) {
+                                            resolver.openOutputStream(uri)?.use { os ->
+                                                bitmapToSave.compress(Bitmap.CompressFormat.PNG, 100, os)
+                                            }
+                                            // 切换回主线程显示成功
+                                            withContext(Dispatchers.Main) {
+                                                snackbarHostState.showSnackbar("图片已保存到相册")
+                                            }
+                                        } else {
+                                            withContext(Dispatchers.Main) {
+                                                snackbarHostState.showSnackbar("保存失败: 无法创建文件")
+                                            }
                                         }
-                                    } else {
-                                        coroutineScope.launch { snackbarHostState.showSnackbar("保存失败: 无法创建文件") }
                                     }
-                                } catch (_: IOException) {
-                                    coroutineScope.launch { snackbarHostState.showSnackbar("保存失败: IO错误") }
-                                } catch (_: Exception) {
-                                    coroutineScope.launch { snackbarHostState.showSnackbar("保存失败: 未知错误") }
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    snackbarHostState.showSnackbar("保存失败: ${e.message}")
                                 }
                             } else {
-                                coroutineScope.launch { snackbarHostState.showSnackbar("保存失败: 无法捕获图片") }
+                                snackbarHostState.showSnackbar("保存失败: 无法处理图片")
                             }
                         }
                     }) {
@@ -251,15 +267,18 @@ fun EditorScreen(
                         -(offsetY / glSurfaceViewSize.height.toFloat()) * 2f
                     )
 
-                    if (appliedCropRect != null && glSurfaceViewSize != IntSize.Zero) {
-                        val glLeft = (appliedCropRect!!.left / glSurfaceViewSize.width.toFloat()) * 2f - 1f
-                        val glTop = 1f - (appliedCropRect!!.top / glSurfaceViewSize.height.toFloat()) * 2f
-                        val glRight = (appliedCropRect!!.right / glSurfaceViewSize.width.toFloat()) * 2f - 1f
-                        val glBottom = 1f - (appliedCropRect!!.bottom / glSurfaceViewSize.height.toFloat()) * 2f
-                        val glCropRect = Rect(glLeft, glTop, glRight, glBottom)
-                        imageRenderer.setAppliedCropRect(glCropRect)
+                    if (appliedCropRect != null && imageSize != Size.Zero) {
+                        // 计算归一化坐标 (0.0 到 1.0)
+                        // 这样 ImageRenderer 就知道裁剪区域相对于原图的比例，从而正确计算长宽比，防止拉伸
+                        val normalizedLeft = appliedCropRect!!.left / imageSize.width
+                        val normalizedTop = appliedCropRect!!.top / imageSize.height
+                        val normalizedRight = appliedCropRect!!.right / imageSize.width
+                        val normalizedBottom = appliedCropRect!!.bottom / imageSize.height
+
+                        val normalizedRect = Rect(normalizedLeft, normalizedTop, normalizedRight, normalizedBottom)
+                        imageRenderer.setNormalizedCropRect(normalizedRect)
                     } else {
-                        imageRenderer.setAppliedCropRect(null)
+                        imageRenderer.setNormalizedCropRect(null)
                     }
                 }
             )

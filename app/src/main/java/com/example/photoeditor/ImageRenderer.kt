@@ -7,7 +7,8 @@ import android.net.Uri
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
-import androidx.compose.ui.geometry.Rect // Import Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -18,35 +19,51 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private val vertexShaderCode =
         "attribute vec4 vPosition;" +
-        "attribute vec2 vTexCoord;" +
-        "uniform float uScale;" +
-        "uniform vec2 uTranslate;" +
-        "varying vec2 TexCoord;" +
-        "void main() {" +
-        "  gl_Position = vec4(vPosition.xy * uScale + uTranslate, vPosition.zw);" +
-        "  TexCoord = vTexCoord;" +
-        "}"
+                "attribute vec2 vTexCoord;" +
+                "uniform float uScale;" +
+                "uniform vec2 uTranslate;" +
+                "varying vec2 TexCoord;" +
+                "void main() {" +
+                "  gl_Position = vec4(vPosition.xy * uScale + uTranslate, vPosition.zw);" +
+                "  TexCoord = vTexCoord;" +
+                "}"
 
     private val fragmentShaderCode =
         "precision mediump float;" +
-        "uniform sampler2D uTexture;" +
-        "varying vec2 TexCoord;" +
-        "void main() {" +
-        "  gl_FragColor = texture2D(uTexture, TexCoord);" +
-        "}"
+                "uniform sampler2D uTexture;" +
+                "varying vec2 TexCoord;" +
+                "void main() {" +
+                "  gl_FragColor = texture2D(uTexture, TexCoord);" +
+                "}"
 
     private var program: Int = 0
     private lateinit var vertexBuffer: FloatBuffer
     private lateinit var texCoordBuffer: FloatBuffer
     private val textureIds = IntArray(1)
 
-    private val quadVertices = floatArrayOf( -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f )
-    private val defaultTexCoords = floatArrayOf( 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f )
+    private val quadVertices = floatArrayOf(
+        -1.0f, -1.0f, // 左下
+        1.0f, -1.0f,  // 右下
+        -1.0f, 1.0f,  // 左上
+        1.0f, 1.0f    // 右上
+    )
 
-    @Volatile var currentScale = 1.0f
-    @Volatile var currentTranslateX = 0.0f
-    @Volatile var currentTranslateY = 0.0f
+    // 默认纹理坐标 (V=0 是顶部)
+    private val defaultTexCoords = floatArrayOf(
+        0.0f, 1.0f, // 左下
+        1.0f, 1.0f, // 右下
+        0.0f, 0.0f, // 左上
+        1.0f, 0.0f  // 右上
+    )
 
+    // --- 变换参数 ---
+    @Volatile private var baseScaleX = 1.0f
+    @Volatile private var baseScaleY = 1.0f
+    @Volatile private var userScale = 1.0f
+    @Volatile private var userTranslateX = 0.0f
+    @Volatile private var userTranslateY = 0.0f
+
+    // --- 状态管理 ---
     private var _imageUri: Uri? = null
     private var currentLoadedUri: Uri? = null
     var surfaceView: GLSurfaceView? = null
@@ -56,39 +73,47 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var imageWidth: Int = 0
     private var imageHeight: Int = 0
 
-    @Volatile private var appliedCropRect: Rect? = null // Store crop rect in NDC
-
-    private val fbo = IntArray(1)
-    private val renderBuffer = IntArray(1)
-    private val fboTexture = IntArray(1)
-    private var fboWidth = 0
-    private var fboHeight = 0
+    // 存储归一化的裁剪区域 (0.0 到 1.0)
+    // Left/Top 是 0, Right/Bottom 是 1 代表全图
+    @Volatile private var normalizedCropRect: Rect? = null
 
     fun setImageUri(uri: Uri, glSurfaceView: GLSurfaceView) {
         _imageUri = uri
         surfaceView = glSurfaceView
         if (uri != currentLoadedUri) {
-            currentScale = 1.0f
-            currentTranslateX = 0.0f
-            currentTranslateY = 0.0f
-            appliedCropRect = null
+            userScale = 1.0f
+            userTranslateX = 0.0f
+            userTranslateY = 0.0f
+            normalizedCropRect = null
+            currentLoadedUri = null
         }
         glSurfaceView.requestRender()
     }
 
     fun setScale(scale: Float) {
-        currentScale = scale
+        userScale = scale
         surfaceView?.requestRender()
     }
 
     fun setTranslation(x: Float, y: Float) {
-        currentTranslateX = x
-        currentTranslateY = y
+        userTranslateX = x
+        userTranslateY = y
         surfaceView?.requestRender()
     }
 
-    fun setAppliedCropRect(rect: Rect?) {
-        appliedCropRect = rect
+    // 新方法：接收归一化坐标 (0.0 - 1.0)
+    fun setNormalizedCropRect(rect: Rect?) {
+        normalizedCropRect = rect
+        // 关键：更新完裁剪区域后，必须重新计算 baseScale，否则形状会拉伸
+        updateBaseScale()
+        surfaceView?.requestRender()
+    }
+
+    // 兼容旧接口，虽然 EditorScreen 可能不再用它
+    fun setTransform(scale: Float, offset: Offset) {
+        userScale = scale
+        userTranslateX = offset.x
+        userTranslateY = offset.y
         surfaceView?.requestRender()
     }
 
@@ -110,95 +135,70 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
 
         GLES20.glGenTextures(1, textureIds, 0)
-        currentLoadedUri = null
-    }
-
-    override fun onDrawFrame(gl: GL10?) {
-        drawScene(0, viewportWidth, viewportHeight) // Draw to default framebuffer
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
         viewportWidth = width
         viewportHeight = height
-        setupOffscreenRender(width, height) // Setup FBO with current surface size
+        updateBaseScale()
         surfaceView?.requestRender()
     }
 
-    private fun drawScene(targetFramebuffer: Int, targetWidth: Int, targetHeight: Int) {
-        if (targetFramebuffer != 0) {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, targetFramebuffer)
-            GLES20.glViewport(0, 0, targetWidth, targetHeight)
-        } else {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-        }
+    override fun onDrawFrame(gl: GL10?) {
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
         _imageUri?.let { uri ->
             if (uri != currentLoadedUri) {
                 try {
                     context.contentResolver.openInputStream(uri)?.use { inputStream ->
                         val bitmap = BitmapFactory.decodeStream(inputStream)
-                        imageWidth = bitmap.width
-                        imageHeight = bitmap.height
-                        loadTexture(bitmap)
-                        bitmap.recycle()
-                        currentLoadedUri = uri
+                        if (bitmap != null) {
+                            imageWidth = bitmap.width
+                            imageHeight = bitmap.height
+                            loadTexture(bitmap)
+                            bitmap.recycle()
+                            currentLoadedUri = uri
+                            updateBaseScale() // 图片加载完也要重新计算比例
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    currentLoadedUri = null
                 }
             }
         }
 
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        if (imageWidth == 0 || imageHeight == 0) return
+
         GLES20.glUseProgram(program)
 
-        // Calculate aspect ratio scales for the image within the viewport
-        var effectiveScaleX = 1.0f
-        var effectiveScaleY = 1.0f
-        if (targetWidth != 0 && targetHeight != 0 && imageWidth != 0 && imageHeight != 0) {
-            val viewportRatio = targetWidth.toFloat() / targetHeight.toFloat()
-            val imageRatio = imageWidth.toFloat() / imageHeight.toFloat()
-
-            if (imageRatio > viewportRatio) {
-                effectiveScaleY = viewportRatio / imageRatio
-            } else {
-                effectiveScaleX = imageRatio / viewportRatio
-            }
-        }
-
-        // The NDC bounds of the displayed image within the GLSurfaceView
-        val imgNdcLeft = -effectiveScaleX
-        val imgNdcRight = effectiveScaleX
-        val imgNdcBottom = -effectiveScaleY
-        val imgNdcTop = effectiveScaleY
-
-        val currentTexCoords = if (appliedCropRect != null) {
-            // Map appliedCropRect (GLSurfaceView NDC) to relative to image NDC bounds
-            // Then map that relative range to the 0-1 texture range.
-
-            val cropLeftRelToImg = (appliedCropRect!!.left - imgNdcLeft) / (imgNdcRight - imgNdcLeft)
-            val cropRightRelToImg = (appliedCropRect!!.right - imgNdcLeft) / (imgNdcRight - imgNdcLeft)
-            // For Y, NDC Y=1 (top) maps to Texture Y=0 (top)
-            // NDC Y=-1 (bottom) maps to Texture Y=1 (bottom)
-            val cropTopRelToImg = (imgNdcTop - appliedCropRect!!.top) / (imgNdcTop - imgNdcBottom)
-            val cropBottomRelToImg = (imgNdcTop - appliedCropRect!!.bottom) / (imgNdcTop - imgNdcBottom)
-
+        // 1. 处理纹理坐标 (决定显示图片的哪一部分)
+        val currentTexCoords = if (normalizedCropRect != null) {
+            val rect = normalizedCropRect!!
+            // Android Rect 坐标系: Left/Top 是起点
+            // OpenGL 纹理坐标: U (0->1 左到右), V (0->1 上到下, 或者是下到上取决于 loadTexture)
+            // 在我们的 defaultTexCoords 中，V=0 是 Top，V=1 是 Bottom。
+            // 所以直接映射即可：
             floatArrayOf(
-                cropLeftRelToImg, cropBottomRelToImg,  // Bottom Left
-                cropRightRelToImg, cropBottomRelToImg, // Bottom Right
-                cropLeftRelToImg, cropTopRelToImg,     // Top Left
-                cropRightRelToImg, cropTopRelToImg      // Top Right
+                rect.left, rect.bottom, // 左下
+                rect.right, rect.bottom, // 右下
+                rect.left, rect.top,    // 左上
+                rect.right, rect.top     // 右上
             )
         } else {
             defaultTexCoords
         }
         texCoordBuffer.put(currentTexCoords).position(0)
-        
-        val adjustedVertices = calculateAdjustedVertices()
-        vertexBuffer.put(adjustedVertices).position(0)
+
+        // 2. 更新顶点几何形状 (决定显示的矩形框长宽比)
+        // 这一步是修复拉伸问题的关键
+        val vertices = floatArrayOf(
+            -baseScaleX, -baseScaleY, // 左下
+            baseScaleX, -baseScaleY, // 右下
+            -baseScaleX,  baseScaleY, // 左上
+            baseScaleX,  baseScaleY  // 右上
+        )
+        vertexBuffer.put(vertices).position(0)
 
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -207,13 +207,13 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord")
         GLES20.glEnableVertexAttribArray(texCoordHandle)
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
-        
+
         val scaleHandle = GLES20.glGetUniformLocation(program, "uScale")
         val translateHandle = GLES20.glGetUniformLocation(program, "uTranslate")
         val textureHandle = GLES20.glGetUniformLocation(program, "uTexture")
-        
-        GLES20.glUniform1f(scaleHandle, currentScale)
-        GLES20.glUniform2f(translateHandle, currentTranslateX, currentTranslateY)
+
+        GLES20.glUniform1f(scaleHandle, userScale)
+        GLES20.glUniform2f(translateHandle, userTranslateX, userTranslateY)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
@@ -223,102 +223,39 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
-
-        if (targetFramebuffer != 0) {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0) // Unbind FBO, switch back to default
-        }
     }
 
-    private fun setupOffscreenRender(width: Int, height: Int) {
-        if (fboWidth == width && fboHeight == height && fbo[0] != 0) {
-            return // FBO already set up with correct size
-        }
+    // 核心修复逻辑：根据是否裁剪，计算正确的宽高比
+    private fun updateBaseScale() {
+        if (viewportWidth == 0 || viewportHeight == 0 || imageWidth == 0 || imageHeight == 0) return
 
-        fboWidth = width
-        fboHeight = height
+        // 1. 确定当前要显示内容的宽高
+        val contentWidth: Float
+        val contentHeight: Float
 
-        // Delete old FBO if exists
-        if (fbo[0] != 0) {
-            GLES20.glDeleteFramebuffers(1, fbo, 0)
-            GLES20.glDeleteTextures(1, fboTexture, 0)
-            GLES20.glDeleteRenderbuffers(1, renderBuffer, 0)
-        }
-
-        // Generate FBO
-        GLES20.glGenFramebuffers(1, fbo, 0)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-
-        // Generate texture for FBO color attachment
-        GLES20.glGenTextures(1, fboTexture, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fboTexture[0])
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, fboWidth, fboHeight, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, fboTexture[0], 0)
-
-        // Generate renderbuffer for depth/stencil attachment
-        GLES20.glGenRenderbuffers(1, renderBuffer, 0)
-        GLES20.glBindRenderbuffer(GLES20.GL_RENDERBUFFER, renderBuffer[0])
-        GLES20.glRenderbufferStorage(GLES20.GL_RENDERBUFFER, GLES20.GL_DEPTH_COMPONENT16, fboWidth, fboHeight)
-        GLES20.glFramebufferRenderbuffer(GLES20.GL_FRAMEBUFFER, GLES20.GL_DEPTH_ATTACHMENT, GLES20.GL_RENDERBUFFER, renderBuffer[0])
-
-        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
-        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-            // Handle FBO creation error
-        }
-
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0) // Unbind FBO
-    }
-
-    fun captureRenderedBitmap(): Bitmap? {
-        if (fbo[0] == 0 || fboWidth == 0 || fboHeight == 0) {
-            return null
-        }
-
-        var resultBitmap: Bitmap? = null
-        // For simplicity and immediate return, we'll try to draw directly here
-        // and then read pixels. This might lead to issues if not on GL thread.
-        // A proper solution involves synchronization (e.g., a CountDownLatch).
-
-        // Execute capture on GL thread
-        val tempBuffer = ByteBuffer.allocateDirect(fboWidth * fboHeight * 4)
-        tempBuffer.order(ByteOrder.nativeOrder())
-
-        drawScene(fbo[0], fboWidth, fboHeight) // Render to FBO immediately
-
-        GLES20.glReadPixels(0, 0, fboWidth, fboHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, tempBuffer)
-        tempBuffer.position(0)
-
-        val rawBitmap = Bitmap.createBitmap(fboWidth, fboHeight, Bitmap.Config.ARGB_8888)
-        rawBitmap.copyPixelsFromBuffer(tempBuffer)
-
-        val matrix = android.graphics.Matrix().apply { postScale(1f, -1f, fboWidth / 2f, fboHeight / 2f) }
-        resultBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, fboWidth, fboHeight, matrix, true)
-        rawBitmap.recycle() // Recycle the raw bitmap
-
-        return resultBitmap
-    }
-
-    private fun calculateAdjustedVertices(): FloatArray {
-        if (viewportWidth == 0 || viewportHeight == 0 || imageWidth == 0 || imageHeight == 0) {
-            return quadVertices
-        }
-
-        val viewportRatio = viewportWidth.toFloat() / viewportHeight.toFloat()
-        val imageRatio = imageWidth.toFloat() / imageHeight.toFloat()
-
-        var scaleX = 1.0f
-        var scaleY = 1.0f
-
-        if (imageRatio > viewportRatio) {
-            scaleY = viewportRatio / imageRatio
+        if (normalizedCropRect != null) {
+            // 如果有裁剪，宽高是原图宽高 * 裁剪比例
+            contentWidth = imageWidth * normalizedCropRect!!.width
+            contentHeight = imageHeight * normalizedCropRect!!.height
         } else {
-            scaleX = imageRatio / viewportRatio
+            // 没有裁剪，就是原图宽高
+            contentWidth = imageWidth.toFloat()
+            contentHeight = imageHeight.toFloat()
         }
 
-        return floatArrayOf(-scaleX, -scaleY, scaleX, -scaleY, -scaleX, scaleY, scaleX, scaleY)
+        // 2. 计算 Fit Center (居中适应) 比例
+        val viewportRatio = viewportWidth.toFloat() / viewportHeight.toFloat()
+        val contentRatio = contentWidth / contentHeight
+
+        if (contentRatio > viewportRatio) {
+            // 内容比屏幕宽：宽度撑满 (1.0)，高度按比例缩小
+            baseScaleX = 1.0f
+            baseScaleY = viewportRatio / contentRatio
+        } else {
+            // 内容比屏幕高：高度撑满 (1.0)，宽度按比例缩小
+            baseScaleX = contentRatio / viewportRatio
+            baseScaleY = 1.0f
+        }
     }
 
     private fun loadShader(type: Int, shaderCode: String): Int {
@@ -330,6 +267,8 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private fun loadTexture(bitmap: Bitmap) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)

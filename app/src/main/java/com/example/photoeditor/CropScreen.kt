@@ -34,7 +34,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.photoeditor.ui.theme.PhotoEditorTheme
 import kotlin.math.pow
-
+import android.os.Build
+import android.media.ExifInterface
 // --- 枚举与辅助函数 ---
 
 enum class DragHandle {
@@ -43,9 +44,6 @@ enum class DragHandle {
 
 /**
  * 根据名称获取长宽比 (Width / Height)
- * @param ratioName 选中的比例名称
- * @param imgSize 图片原始尺寸 (用于计算"原比例")
- * @return 比例 Float 值，如果为 "自由" 则返回 null
  */
 fun getAspectRatio(ratioName: String, imgSize: Size): Float? {
     if (imgSize == Size.Zero) return null
@@ -75,8 +73,11 @@ fun CropScreen(
     var selectedRatio by remember { mutableStateOf("自由") }
     var selectedFunction by remember { mutableStateOf("裁剪") }
     var imageSize by remember { mutableStateOf(Size.Zero) }
-    var imageDisplayRect by remember { mutableStateOf(Rect.Zero) } // 图片在屏幕上的实际显示区域
-    var cropRect by remember { mutableStateOf(Rect.Zero) } // 裁剪框相对于 Canvas 的坐标
+
+    // imageDisplayRect 这里代表：图片显示区域相对于 GLSurfaceView 左上角的坐标。
+    // 因为我们修改了布局，GLSurfaceView 现在是完全贴合图片的，所以 Left/Top 恒为 0。
+    var imageDisplayRect by remember { mutableStateOf(Rect.Zero) }
+    var cropRect by remember { mutableStateOf(Rect.Zero) }
 
     // 拖拽交互状态
     var dragHandle by remember { mutableStateOf(DragHandle.NONE) }
@@ -87,27 +88,25 @@ fun CropScreen(
     // --- Undo/Redo 历史栈 ---
     val undoStack = remember { mutableStateListOf<Rect>() }
     val redoStack = remember { mutableStateListOf<Rect>() }
-    var dragStartRect by remember { mutableStateOf(Rect.Zero) } // 拖拽开始时的快照
+    var dragStartRect by remember { mutableStateOf(Rect.Zero) }
 
-    // 辅助：记录操作 (存入 Undo，清空 Redo)
+    // 辅助：记录操作
     fun recordAction(oldState: Rect) {
         undoStack.add(oldState)
         redoStack.clear()
     }
 
-    // 辅助：执行撤销
     fun performUndo() {
         if (undoStack.isNotEmpty()) {
-            val previousRect = undoStack.removeAt(undoStack.lastIndex) // 使用 removeAt 兼容 API 24
+            val previousRect = undoStack.removeAt(undoStack.lastIndex)
             redoStack.add(cropRect)
             cropRect = previousRect
         }
     }
 
-    // 辅助：执行重做
     fun performRedo() {
         if (redoStack.isNotEmpty()) {
-            val nextRect = redoStack.removeAt(redoStack.lastIndex) // 使用 removeAt 兼容 API 24
+            val nextRect = redoStack.removeAt(redoStack.lastIndex)
             undoStack.add(cropRect)
             cropRect = nextRect
         }
@@ -117,10 +116,35 @@ fun CropScreen(
     LaunchedEffect(imageUri) {
         if (imageUri != Uri.EMPTY) {
             try {
+                // 1. 获取原始宽高
+                var rawWidth = 0f
+                var rawHeight = 0f
                 context.contentResolver.openInputStream(imageUri)?.use { inputStream ->
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeStream(inputStream, null, options)
-                    imageSize = Size(options.outWidth.toFloat(), options.outHeight.toFloat())
+                    rawWidth = options.outWidth.toFloat()
+                    rawHeight = options.outHeight.toFloat()
+                }
+
+                // 2. 获取旋转信息
+                var rotation = 0
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    context.contentResolver.openInputStream(imageUri)?.use { inputStream ->
+                        val exif = ExifInterface(inputStream)
+                        val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                        when (orientation) {
+                            ExifInterface.ORIENTATION_ROTATE_90 -> rotation = 90
+                            ExifInterface.ORIENTATION_ROTATE_180 -> rotation = 180
+                            ExifInterface.ORIENTATION_ROTATE_270 -> rotation = 270
+                        }
+                    }
+                }
+
+                // 3. 如果是 90 或 270 度，交换宽高
+                imageSize = if (rotation == 90 || rotation == 270) {
+                    Size(rawHeight, rawWidth)
+                } else {
+                    Size(rawWidth, rawHeight)
                 }
             } catch (e: Exception) {
                 imageSize = Size.Zero
@@ -136,225 +160,228 @@ fun CropScreen(
                 .padding(innerPadding)
                 .fillMaxSize()
         ) {
-            // 1. 中间画布区域 (GLSurfaceView + Canvas)
-            Box(
+            // 1. 中间画布区域 (使用 BoxWithConstraints 进行精确布局)
+            BoxWithConstraints(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .weight(1f)
+                    .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // 底层：渲染图片
-                AndroidView(
-                    factory = { ctx ->
-                        GLSurfaceView(ctx).apply {
-                            setEGLContextClientVersion(2)
-                            setRenderer(imageRenderer)
-                            renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    update = { view ->
-                        imageRenderer.setImageUri(imageUri, view)
-                    }
-                )
+                val density = LocalDensity.current
 
-                // 顶层：绘制裁剪框 & 处理手势
-                Canvas(modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart = { startOffset ->
-                                dragStartRect = cropRect // 记住拖拽前的位置
+                // 直接使用 scope 中的 maxWidth 和 maxHeight (Dp类型)
+                // 这样能确保 IDE 识别到我们在使用 BoxWithConstraints 的 scope
+                val boxWidth = this.maxWidth
+                val boxHeight = this.maxHeight
 
-                                // 判断按下的位置是哪个手柄
-                                dragHandle = when {
-                                    (startOffset - cropRect.topLeft).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.TOP_LEFT
-                                    (startOffset - cropRect.topRight).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.TOP_RIGHT
-                                    (startOffset - cropRect.bottomLeft).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.BOTTOM_LEFT
-                                    (startOffset - cropRect.bottomRight).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.BOTTOM_RIGHT
-                                    cropRect.contains(startOffset) -> DragHandle.BODY
-                                    else -> DragHandle.NONE
-                                }
-                            },
-                            onDragEnd = {
-                                // 拖拽结束：若位置改变，记录历史
-                                if (dragHandle != DragHandle.NONE && cropRect != dragStartRect) {
-                                    recordAction(dragStartRect)
-                                }
-                                dragHandle = DragHandle.NONE
-                            }
-                        ) { change, dragAmount ->
-                            change.consume()
-                            if (imageDisplayRect == Rect.Zero) return@detectDragGestures
+                // 计算图片在当前屏幕区域下的实际显示尺寸 (Fit Center)
+                val displaySize = remember(imageSize, boxWidth, boxHeight) {
+                    // 将 Dp 转为 Px
+                    val maxWidthPx = with(density) { boxWidth.toPx() }
+                    val maxHeightPx = with(density) { boxHeight.toPx() }
 
-                            val targetAspectRatio = getAspectRatio(selectedRatio, imageSize)
-
-                            // 1. 移动整体 (不涉及比例锁定)
-                            if (dragHandle == DragHandle.BODY) {
-                                val newOffsetX = dragAmount.x.coerceIn(
-                                    imageDisplayRect.left - cropRect.left,
-                                    imageDisplayRect.right - cropRect.right
-                                )
-                                val newOffsetY = dragAmount.y.coerceIn(
-                                    imageDisplayRect.top - cropRect.top,
-                                    imageDisplayRect.bottom - cropRect.bottom
-                                )
-                                cropRect = cropRect.translate(Offset(newOffsetX, newOffsetY))
-                                return@detectDragGestures
-                            }
-
-                            // 2. 调整大小
-                            if (targetAspectRatio == null) {
-                                // === 自由模式 (Free) ===
-                                when (dragHandle) {
-                                    DragHandle.TOP_LEFT -> {
-                                        val newLeft = (cropRect.left + dragAmount.x).coerceIn(imageDisplayRect.left, cropRect.right - minCropSize)
-                                        val newTop = (cropRect.top + dragAmount.y).coerceIn(imageDisplayRect.top, cropRect.bottom - minCropSize)
-                                        cropRect = cropRect.copy(left = newLeft, top = newTop)
-                                    }
-                                    DragHandle.TOP_RIGHT -> {
-                                        val newRight = (cropRect.right + dragAmount.x).coerceIn(cropRect.left + minCropSize, imageDisplayRect.right)
-                                        val newTop = (cropRect.top + dragAmount.y).coerceIn(imageDisplayRect.top, cropRect.bottom - minCropSize)
-                                        cropRect = cropRect.copy(right = newRight, top = newTop)
-                                    }
-                                    DragHandle.BOTTOM_LEFT -> {
-                                        val newLeft = (cropRect.left + dragAmount.x).coerceIn(imageDisplayRect.left, cropRect.right - minCropSize)
-                                        val newBottom = (cropRect.bottom + dragAmount.y).coerceIn(cropRect.top + minCropSize, imageDisplayRect.bottom)
-                                        cropRect = cropRect.copy(left = newLeft, bottom = newBottom)
-                                    }
-                                    DragHandle.BOTTOM_RIGHT -> {
-                                        val newRight = (cropRect.right + dragAmount.x).coerceIn(cropRect.left + minCropSize, imageDisplayRect.right)
-                                        val newBottom = (cropRect.bottom + dragAmount.y).coerceIn(cropRect.top + minCropSize, imageDisplayRect.bottom)
-                                        cropRect = cropRect.copy(right = newRight, bottom = newBottom)
-                                    }
-                                    else -> {}
-                                }
-                            } else {
-                                // === 固定比例模式 (Fixed Aspect Ratio) ===
-                                // 逻辑：优先响应 X 轴变化，计算 Y 轴，并进行边界修正
-                                when (dragHandle) {
-                                    DragHandle.BOTTOM_RIGHT -> {
-                                        var newWidth = (cropRect.width + dragAmount.x)
-                                        var newHeight = newWidth / targetAspectRatio
-
-                                        // 检查边界
-                                        if (cropRect.left + newWidth > imageDisplayRect.right) {
-                                            newWidth = imageDisplayRect.right - cropRect.left
-                                            newHeight = newWidth / targetAspectRatio
-                                        }
-                                        if (cropRect.top + newHeight > imageDisplayRect.bottom) {
-                                            newHeight = imageDisplayRect.bottom - cropRect.top
-                                            newWidth = newHeight * targetAspectRatio
-                                        }
-
-                                        if (newWidth >= minCropSize && newHeight >= minCropSize) {
-                                            cropRect = cropRect.copy(right = cropRect.left + newWidth, bottom = cropRect.top + newHeight)
-                                        }
-                                    }
-                                    DragHandle.BOTTOM_LEFT -> {
-                                        var newWidth = (cropRect.width - dragAmount.x)
-                                        var newHeight = newWidth / targetAspectRatio
-
-                                        if (cropRect.right - newWidth < imageDisplayRect.left) {
-                                            newWidth = cropRect.right - imageDisplayRect.left
-                                            newHeight = newWidth / targetAspectRatio
-                                        }
-                                        if (cropRect.top + newHeight > imageDisplayRect.bottom) {
-                                            newHeight = imageDisplayRect.bottom - cropRect.top
-                                            newWidth = newHeight * targetAspectRatio
-                                        }
-
-                                        if (newWidth >= minCropSize && newHeight >= minCropSize) {
-                                            cropRect = cropRect.copy(left = cropRect.right - newWidth, bottom = cropRect.top + newHeight)
-                                        }
-                                    }
-                                    DragHandle.TOP_RIGHT -> {
-                                        var newWidth = (cropRect.width + dragAmount.x)
-                                        var newHeight = newWidth / targetAspectRatio
-
-                                        if (cropRect.left + newWidth > imageDisplayRect.right) {
-                                            newWidth = imageDisplayRect.right - cropRect.left
-                                            newHeight = newWidth / targetAspectRatio
-                                        }
-                                        if (cropRect.bottom - newHeight < imageDisplayRect.top) {
-                                            newHeight = cropRect.bottom - imageDisplayRect.top
-                                            newWidth = newHeight * targetAspectRatio
-                                        }
-
-                                        if (newWidth >= minCropSize && newHeight >= minCropSize) {
-                                            cropRect = cropRect.copy(right = cropRect.left + newWidth, top = cropRect.bottom - newHeight)
-                                        }
-                                    }
-                                    DragHandle.TOP_LEFT -> {
-                                        var newWidth = (cropRect.width - dragAmount.x)
-                                        var newHeight = newWidth / targetAspectRatio
-
-                                        if (cropRect.right - newWidth < imageDisplayRect.left) {
-                                            newWidth = cropRect.right - imageDisplayRect.left
-                                            newHeight = newWidth / targetAspectRatio
-                                        }
-                                        if (cropRect.bottom - newHeight < imageDisplayRect.top) {
-                                            newHeight = cropRect.bottom - imageDisplayRect.top
-                                            newWidth = newHeight * targetAspectRatio
-                                        }
-
-                                        if (newWidth >= minCropSize && newHeight >= minCropSize) {
-                                            cropRect = cropRect.copy(left = cropRect.right - newWidth, top = cropRect.bottom - newHeight)
-                                        }
-                                    }
-                                    else -> {}
-                                }
-                            }
-                        }
-                    }
-                ) {
-                    val canvasWidth = size.width
-                    val canvasHeight = size.height
-
-                    // 每一帧都重新计算图片显示区域 (Center Fit)
-                    if (imageSize != Size.Zero) {
+                    if (imageSize == Size.Zero || maxWidthPx <= 0 || maxHeightPx <= 0) {
+                        Size.Zero
+                    } else {
                         val imageRatio = imageSize.width / imageSize.height
-                        val canvasRatio = canvasWidth / canvasHeight
-
-                        val displayWidth: Float
-                        val displayHeight: Float
-
-                        if (imageRatio > canvasRatio) {
-                            displayWidth = canvasWidth
-                            displayHeight = canvasWidth / imageRatio
+                        val containerRatio = maxWidthPx / maxHeightPx
+                        if (imageRatio > containerRatio) {
+                            // 图片更宽，宽度撑满
+                            Size(maxWidthPx, maxWidthPx / imageRatio)
                         } else {
-                            displayHeight = canvasHeight
-                            displayWidth = canvasHeight * imageRatio
+                            // 图片更高，高度撑满
+                            Size(maxHeightPx * imageRatio, maxHeightPx)
                         }
+                    }
+                }
 
-                        val topLeftX = (canvasWidth - displayWidth) / 2
-                        val topLeftY = (canvasHeight - displayHeight) / 2
-
-                        imageDisplayRect = Rect(
-                            offset = Offset(topLeftX, topLeftY),
-                            size = Size(displayWidth, displayHeight)
-                        )
-
-                        // 首次初始化裁剪框
+                // 当计算出显示尺寸后，更新 imageDisplayRect 和初始化 cropRect
+                LaunchedEffect(displaySize) {
+                    if (displaySize != Size.Zero) {
+                        // 因为容器会缩小到正好包裹图片，所以 Rect 左上角是 (0,0)
+                        imageDisplayRect = Rect(0f, 0f, displaySize.width, displaySize.height)
                         if (cropRect == Rect.Zero) {
                             cropRect = imageDisplayRect
                         }
                     }
+                }
 
-                    // 绘制裁剪框
-                    if (cropRect != Rect.Zero) {
-                        drawRect(
-                            color = Color.White,
-                            topLeft = cropRect.topLeft,
-                            size = cropRect.size,
-                            style = Stroke(width = 2.dp.toPx())
+                // 只有当尺寸计算完成后才显示内容
+                if (displaySize != Size.Zero) {
+                    // 这是一个尺寸严格等于图片显示大小的容器
+                    Box(
+                        modifier = Modifier
+                            .size(
+                                width = with(density) { displaySize.width.toDp() },
+                                height = with(density) { displaySize.height.toDp() }
+                            )
+                    ) {
+                        // 底层：渲染图片
+                        // 这里的 fillMaxSize 是填满刚才定义的 Box (即正好是图片大小)，所以 OpenGL 不会拉伸变形
+                        AndroidView(
+                            factory = { ctx ->
+                                GLSurfaceView(ctx).apply {
+                                    setEGLContextClientVersion(2)
+                                    setRenderer(imageRenderer)
+                                    renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            update = { view ->
+                                imageRenderer.setImageUri(imageUri, view)
+                            }
                         )
-                        // 绘制四个角手柄
-                        drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.topLeft)
-                        drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.topRight)
-                        drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.bottomLeft)
-                        drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.bottomRight)
+
+                        // 顶层：绘制裁剪框 & 处理手势
+                        Canvas(modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragStart = { startOffset ->
+                                        dragStartRect = cropRect
+                                        dragHandle = when {
+                                            (startOffset - cropRect.topLeft).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.TOP_LEFT
+                                            (startOffset - cropRect.topRight).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.TOP_RIGHT
+                                            (startOffset - cropRect.bottomLeft).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.BOTTOM_LEFT
+                                            (startOffset - cropRect.bottomRight).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.BOTTOM_RIGHT
+                                            cropRect.contains(startOffset) -> DragHandle.BODY
+                                            else -> DragHandle.NONE
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        if (dragHandle != DragHandle.NONE && cropRect != dragStartRect) {
+                                            recordAction(dragStartRect)
+                                        }
+                                        dragHandle = DragHandle.NONE
+                                    }
+                                ) { change, dragAmount ->
+                                    change.consume()
+                                    if (imageDisplayRect == Rect.Zero) return@detectDragGestures
+
+                                    val targetAspectRatio = getAspectRatio(selectedRatio, imageSize)
+
+                                    if (dragHandle == DragHandle.BODY) {
+                                        val newOffsetX = dragAmount.x.coerceIn(
+                                            imageDisplayRect.left - cropRect.left,
+                                            imageDisplayRect.right - cropRect.right
+                                        )
+                                        val newOffsetY = dragAmount.y.coerceIn(
+                                            imageDisplayRect.top - cropRect.top,
+                                            imageDisplayRect.bottom - cropRect.bottom
+                                        )
+                                        cropRect = cropRect.translate(Offset(newOffsetX, newOffsetY))
+                                        return@detectDragGestures
+                                    }
+
+                                    if (targetAspectRatio == null) {
+                                        // === 自由模式 ===
+                                        when (dragHandle) {
+                                            DragHandle.TOP_LEFT -> {
+                                                val newLeft = (cropRect.left + dragAmount.x).coerceIn(imageDisplayRect.left, cropRect.right - minCropSize)
+                                                val newTop = (cropRect.top + dragAmount.y).coerceIn(imageDisplayRect.top, cropRect.bottom - minCropSize)
+                                                cropRect = cropRect.copy(left = newLeft, top = newTop)
+                                            }
+                                            DragHandle.TOP_RIGHT -> {
+                                                val newRight = (cropRect.right + dragAmount.x).coerceIn(cropRect.left + minCropSize, imageDisplayRect.right)
+                                                val newTop = (cropRect.top + dragAmount.y).coerceIn(imageDisplayRect.top, cropRect.bottom - minCropSize)
+                                                cropRect = cropRect.copy(right = newRight, top = newTop)
+                                            }
+                                            DragHandle.BOTTOM_LEFT -> {
+                                                val newLeft = (cropRect.left + dragAmount.x).coerceIn(imageDisplayRect.left, cropRect.right - minCropSize)
+                                                val newBottom = (cropRect.bottom + dragAmount.y).coerceIn(cropRect.top + minCropSize, imageDisplayRect.bottom)
+                                                cropRect = cropRect.copy(left = newLeft, bottom = newBottom)
+                                            }
+                                            DragHandle.BOTTOM_RIGHT -> {
+                                                val newRight = (cropRect.right + dragAmount.x).coerceIn(cropRect.left + minCropSize, imageDisplayRect.right)
+                                                val newBottom = (cropRect.bottom + dragAmount.y).coerceIn(cropRect.top + minCropSize, imageDisplayRect.bottom)
+                                                cropRect = cropRect.copy(right = newRight, bottom = newBottom)
+                                            }
+                                            else -> {}
+                                        }
+                                    } else {
+                                        // === 固定比例模式 ===
+                                        when (dragHandle) {
+                                            DragHandle.BOTTOM_RIGHT -> {
+                                                var newWidth = (cropRect.width + dragAmount.x)
+                                                var newHeight = newWidth / targetAspectRatio
+                                                if (cropRect.left + newWidth > imageDisplayRect.right) {
+                                                    newWidth = imageDisplayRect.right - cropRect.left
+                                                    newHeight = newWidth / targetAspectRatio
+                                                }
+                                                if (cropRect.top + newHeight > imageDisplayRect.bottom) {
+                                                    newHeight = imageDisplayRect.bottom - cropRect.top
+                                                    newWidth = newHeight * targetAspectRatio
+                                                }
+                                                if (newWidth >= minCropSize && newHeight >= minCropSize) {
+                                                    cropRect = cropRect.copy(right = cropRect.left + newWidth, bottom = cropRect.top + newHeight)
+                                                }
+                                            }
+                                            DragHandle.BOTTOM_LEFT -> {
+                                                var newWidth = (cropRect.width - dragAmount.x)
+                                                var newHeight = newWidth / targetAspectRatio
+                                                if (cropRect.right - newWidth < imageDisplayRect.left) {
+                                                    newWidth = cropRect.right - imageDisplayRect.left
+                                                    newHeight = newWidth / targetAspectRatio
+                                                }
+                                                if (cropRect.top + newHeight > imageDisplayRect.bottom) {
+                                                    newHeight = imageDisplayRect.bottom - cropRect.top
+                                                    newWidth = newHeight * targetAspectRatio
+                                                }
+                                                if (newWidth >= minCropSize && newHeight >= minCropSize) {
+                                                    cropRect = cropRect.copy(left = cropRect.right - newWidth, bottom = cropRect.top + newHeight)
+                                                }
+                                            }
+                                            DragHandle.TOP_RIGHT -> {
+                                                var newWidth = (cropRect.width + dragAmount.x)
+                                                var newHeight = newWidth / targetAspectRatio
+                                                if (cropRect.left + newWidth > imageDisplayRect.right) {
+                                                    newWidth = imageDisplayRect.right - cropRect.left
+                                                    newHeight = newWidth / targetAspectRatio
+                                                }
+                                                if (cropRect.bottom - newHeight < imageDisplayRect.top) {
+                                                    newHeight = cropRect.bottom - imageDisplayRect.top
+                                                    newWidth = newHeight * targetAspectRatio
+                                                }
+                                                if (newWidth >= minCropSize && newHeight >= minCropSize) {
+                                                    cropRect = cropRect.copy(right = cropRect.left + newWidth, top = cropRect.bottom - newHeight)
+                                                }
+                                            }
+                                            DragHandle.TOP_LEFT -> {
+                                                var newWidth = (cropRect.width - dragAmount.x)
+                                                var newHeight = newWidth / targetAspectRatio
+                                                if (cropRect.right - newWidth < imageDisplayRect.left) {
+                                                    newWidth = cropRect.right - imageDisplayRect.left
+                                                    newHeight = newWidth / targetAspectRatio
+                                                }
+                                                if (cropRect.bottom - newHeight < imageDisplayRect.top) {
+                                                    newHeight = cropRect.bottom - imageDisplayRect.top
+                                                    newWidth = newHeight * targetAspectRatio
+                                                }
+                                                if (newWidth >= minCropSize && newHeight >= minCropSize) {
+                                                    cropRect = cropRect.copy(left = cropRect.right - newWidth, top = cropRect.bottom - newHeight)
+                                                }
+                                            }
+                                            else -> {}
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            // 绘制部分：由于Canvas已经就是图片大小了，直接绘制即可，无需再算Offsets
+                            if (cropRect != Rect.Zero) {
+                                drawRect(
+                                    color = Color.White,
+                                    topLeft = cropRect.topLeft,
+                                    size = cropRect.size,
+                                    style = Stroke(width = 2.dp.toPx())
+                                )
+                                drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.topLeft)
+                                drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.topRight)
+                                drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.bottomLeft)
+                                drawCircle(Color.White, radius = handleRadius / 2, center = cropRect.bottomRight)
+                            }
+                        }
                     }
                 }
             }
@@ -365,13 +392,12 @@ fun CropScreen(
                 onRatioSelected = { newRatioName ->
                     if (selectedRatio == newRatioName) return@CropBottomBar
 
-                    // 切换比例时：记录历史，并重置裁剪框为最大居中框
                     recordAction(cropRect)
                     selectedRatio = newRatioName
 
                     val targetRatio = getAspectRatio(newRatioName, imageSize)
                     if (targetRatio != null && imageDisplayRect != Rect.Zero) {
-                        // 计算符合比例的最大框
+                        // 在当前显示区域(0,0, w, h)内居中计算最大框
                         val displayWidth = imageDisplayRect.width
                         val displayHeight = imageDisplayRect.height
                         val displayRatio = displayWidth / displayHeight
@@ -380,17 +406,15 @@ fun CropScreen(
                         val newHeight: Float
 
                         if (targetRatio > displayRatio) {
-                            // 目标更宽 -> 宽度撑满
                             newWidth = displayWidth
                             newHeight = displayWidth / targetRatio
                         } else {
-                            // 目标更高 -> 高度撑满
                             newHeight = displayHeight
                             newWidth = displayHeight * targetRatio
                         }
 
-                        val newLeft = imageDisplayRect.left + (displayWidth - newWidth) / 2
-                        val newTop = imageDisplayRect.top + (displayHeight - newHeight) / 2
+                        val newLeft = (displayWidth - newWidth) / 2
+                        val newTop = (displayHeight - newHeight) / 2
 
                         cropRect = Rect(offset = Offset(newLeft, newTop), size = Size(newWidth, newHeight))
                     }
@@ -398,8 +422,26 @@ fun CropScreen(
                 selectedFunction = selectedFunction,
                 onFunctionSelected = { selectedFunction = it },
                 onCancel = onBack,
-                onConfirm = { onConfirm(cropRect) },
-                // Undo/Redo 参数
+                onConfirm = {
+                    // 1. 计算缩放比例 (原图宽度 / 屏幕显示宽度)
+                    // 只要 imageDisplayRect 宽度大于0，就计算比例，否则比例为1
+                    val scale = if (imageDisplayRect.width > 0f) {
+                        imageSize.width / imageDisplayRect.width
+                    } else {
+                        1f
+                    }
+
+                    // 2. 将屏幕上的裁剪框坐标 * 缩放比例 = 原图上的真实裁剪坐标
+                    val realCropRect = Rect(
+                        left = cropRect.left * scale,
+                        top = cropRect.top * scale,
+                        right = cropRect.right * scale,
+                        bottom = cropRect.bottom * scale
+                    )
+
+                    // 3. 将转换后的 Rect 传出去
+                    onConfirm(realCropRect)
+                },
                 canUndo = undoStack.isNotEmpty(),
                 canRedo = redoStack.isNotEmpty(),
                 onUndo = { performUndo() },
@@ -409,8 +451,7 @@ fun CropScreen(
     }
 }
 
-// --- 底部控制栏 Composable ---
-
+// --- 底部控制栏 (保持不变) ---
 @Composable
 fun CropBottomBar(
     selectedRatio: String,
@@ -428,7 +469,6 @@ fun CropBottomBar(
     val functions = listOf("裁剪", "扩图", "旋转", "矫正")
 
     Column(modifier = Modifier.background(Color.Black)) {
-        // 第一行: 比例选择
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -448,7 +488,6 @@ fun CropBottomBar(
             }
         }
 
-        // 第二行: 功能选择
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -468,7 +507,6 @@ fun CropBottomBar(
             }
         }
 
-        // 第三行: 操作按钮 (Cancel, Undo/Redo, Confirm)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -476,37 +514,19 @@ fun CropBottomBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Cancel
             IconButton(onClick = onCancel) {
                 Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
             }
 
-            // Undo / Redo
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                IconButton(
-                    onClick = onUndo,
-                    enabled = canUndo
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Undo,
-                        contentDescription = "Undo",
-                        tint = if (canUndo) Color.White else Color.DarkGray
-                    )
+                IconButton(onClick = onUndo, enabled = canUndo) {
+                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", tint = if (canUndo) Color.White else Color.DarkGray)
                 }
-
-                IconButton(
-                    onClick = onRedo,
-                    enabled = canRedo
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Redo,
-                        contentDescription = "Redo",
-                        tint = if (canRedo) Color.White else Color.DarkGray
-                    )
+                IconButton(onClick = onRedo, enabled = canRedo) {
+                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = if (canRedo) Color.White else Color.DarkGray)
                 }
             }
 
-            // Confirm
             IconButton(onClick = onConfirm) {
                 Icon(Icons.Default.Check, contentDescription = "Confirm", tint = Color.White)
             }
