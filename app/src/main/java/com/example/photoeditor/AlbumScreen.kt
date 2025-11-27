@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.photoeditor.ui.theme.PhotoEditorTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,7 +97,9 @@ fun AlbumScreen(
             )
         }
     ) { innerPadding ->
-        Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+        Column(modifier = Modifier
+            .padding(innerPadding)
+            .fillMaxSize()) {
             // 1. Filtering Options
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                 filters.forEach { filter ->
@@ -121,7 +124,9 @@ fun AlbumScreen(
 
             // 2. Album Categories
             LazyRow(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(categories) { category ->
@@ -136,11 +141,20 @@ fun AlbumScreen(
             // 3. Media Grid
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 90.dp),
-                modifier = Modifier.fillMaxSize().padding(horizontal = 2.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 2.dp)
             ) {
                 items(mediaUris) { uri ->
+                    // MODIFIED: Use ImageRequest to load thumbnails
+                    val imageRequest = ImageRequest.Builder(LocalContext.current)
+                        .data(uri)
+                        .size(256) // Load a smaller version of the image (e.g., 256x256 pixels)
+                        .crossfade(true) // Add a fade-in animation
+                        .build()
+
                     AsyncImage(
-                        model = uri,
+                        model = imageRequest,
                         contentDescription = null,
                         modifier = Modifier
                             .padding(2.dp)
