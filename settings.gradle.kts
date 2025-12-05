@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "PhotoEditor"
 include(":app")
- 
+include(":benchmark")
+
