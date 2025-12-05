@@ -1,53 +1,97 @@
-# PhotoEditor - 移动图像编辑应用
 
-## 🚀 项目简介
+# 📸 Android High-Performance Photo Editor
 
-PhotoEditor 是一款基于 Jetpack Compose 和 OpenGL ES 构建的现代化安卓图像编辑应用，旨在提供一个直观、高效的移动照片处理体验。本项目以知名的“醒图”App 布局为灵感，实现了其首页、相册页、图像编辑器。
+这是一个基于 **Kotlin** 和 **Jetpack Compose** 构建的现代化 Android 图片编辑应用。
 
-**核心功能概览：**
+不同于传统的 View 体系应用，本项目采用了 **混合渲染架构**：使用 **Jetpack Compose** 构建声明式 UI，核心图片渲染层采用 **OpenGL ES 2.0**，实现了在处理高分辨率图片时的 60FPS 流畅预览、无损缩放与高性能裁剪。
 
-*   **首页 (Home Screen)**：动态 Banner、主功能按钮和快速工具栏。
-*   **相册页 (Album Screen)**：本地媒体库访问、缩略图展示和动态权限请求。
-*   **图像编辑器 (Editor Screen)**：
-    *   **OpenGL ES 渲染**：使用 `GLSurfaceView` 实现高性能图像渲染，支持缩放和平移手势。
-    *   **裁剪应用**：能够接收裁剪页返回的坐标，并在渲染器中实时应用裁剪效果。
-    *   **导出保存**：通过离屏渲染 (FBO) 捕获当前编辑结果（包含缩放、平移和裁剪），并使用 Android MediaStore API 保存为 PNG 文件到用户相册。
-*   **裁剪页 (Crop Screen)**：
-    *   **自由比例裁剪**：提供一个可拖动的裁剪框，支持四个角和整个框体的自由拖动。
-    *   **边界约束**：裁剪框的操作被严格限制在图片的显示区域内，并设置了更大的触摸热区以优化用户体验。
-    *   **状态传递**：裁剪完成后，将裁剪区域的坐标信息传回编辑器页。
+## ✨ 核心功能 (Features)
 
-## 📸 核心功能截图
+* **🚀 高性能渲染引擎**：利用 `GLSurfaceView` 和自定义 Shader，将图片作为纹理处理，实现 0 内存增长的实时缩放、平移预览。
+* **✂️ 智能裁剪系统**：
+    * 手写交互逻辑，支持 8 点触控拖拽（四角 + 四边）。
+    * 包含边界约束算法，防止裁剪框移出边界。
+    * 支持固定比例锁定（1:1, 16:9 等）与自由比例切换。
+    * 支持 **撤销/重做 (Undo/Redo)** 操作历史栈。
+* **🖼️ 沉浸式相册管理**：基于 `ContentResolver` 和协程异步加载系统相册，使用 `Coil` 进行缩略图内存优化。
+* **💾 高质量导出**：编辑过程采用无损预览，仅在导出时使用 `BitmapUtils` 进行物理像素切割，自动纠正 EXIF 旋转信息。
+* **🎨 现代化 UI**：全线采用 Material 3 设计风格，包含流光特效 Banner 和丝滑的转场动画。
 
-*   **首页概览**
-![77120f50019c82eedf4b4c9a2751a830](https://github.com/user-attachments/assets/3475abcb-f4fd-4231-97f9-14a4649b9690)
+## 📱 应用截图 (Screenshots)
 
-*   **相册页概览**
-![07aabb8652ce666ac57e50773e47cdfd](https://github.com/user-attachments/assets/bf84df4e-5f3f-4791-92bd-a52c1ef3849e)
+| 首页 (Home) | 系统相册 (Album) | OpenGL 编辑器 (Editor) | 智能裁剪 (Crop) |
+|:---:|:---:|:---:|:---:|
+| <img src="screenshots/home.png" width="200"/> | <img src="screenshots/album.png" width="200"/> | <img src="screenshots/editor.png" width="200"/> | <img src="screenshots/crop.png" width="200"/> |
+| *流光特效与功能入口* | *基于 LazyGrid 的高性能列表* | *双指缩放与实时预览* | *支持撤销/重做与比例锁定* |
 
-*   **图像编辑器 (Editor Screen)**
-![0849ad18e2ec80d7ea9f181df4ed0c02](https://github.com/user-attachments/assets/2057b182-e34b-4650-983f-27861c889870)
+## 🛠 技术栈 (Tech Stack)
 
-*   **裁剪页 (Crop Screen)**
-   ![1b43b907be05af89ceb8230587256e5e](https://github.com/user-attachments/assets/8c3af152-395e-4ca4-8506-7079063534c7)
-    
+* **语言**: Kotlin
+* **UI 框架**: Jetpack Compose (Material3)
+* **架构模式**: MVVM + Single Activity (单向数据流)
+* **图形渲染**: OpenGL ES 2.0 (GLSL Shaders), `GLSurfaceView`, `AndroidView` Interop
+* **图片加载**: Coil (Coroutines Image Loader)
+* **异步处理**: Kotlin Coroutines (Dispatchers.IO / Main)
+* **系统组件**: MediaStore, ContentProvider, ActivityResultContracts (权限管理)
 
-## 🛠️ 构建与运行说明
+## 📂 项目结构 (Project Structure)
 
-### 1. 先决条件
+```text
+com.example.photoeditor
+├── MainActivity.kt          // [UI] 路由中心，管理全屏状态分发
+├── MainViewModel.kt         // [ViewModel] 数据持有层，负责异步扫描相册
+├── ui.theme                 // [Theme] Compose 主题配置
+├── screen
+│   ├── AlbumScreen.kt       // [UI] 相册选择页，处理权限与列表展示
+│   ├── EditorScreen.kt      // [UI] 编辑器容器，处理手势与 OpenGL 视图桥接
+│   └── CropScreen.kt        // [UI] 裁剪交互页，包含 Canvas 自绘与手势算法
+├── renderer
+│   └── ImageRenderer.kt     // [Core] OpenGL 渲染引擎，负责纹理映射与 Shader 绘制
+└── utils
+    └── BitmapUtils.kt       // [Utils] 底层图像处理，负责 IO 读写与物理裁剪
+```
 
-*   **Android Studio Dolphin (2021.1.1) 或更高版本**
-*   **Java Development Kit (JDK) 11 或更高版本**
-*   **物理安卓设备 或 安卓模拟器** (API Level 24 / Android 7.0 或更高)
-*   **Git** (用于克隆仓库)
+## ⚡️ 快速开始 (Getting Started)
 
+### 环境要求 (Prerequisites)
 
+* **Android Studio**: Hedgehog | 2023.1.1 或更高版本
+* **Kotlin Plugin**: 1.9.0+
+* **JDK**: 17
+* **minSdk**: 24 (Android 7.0)
+* **targetSdk**: 34 (Android 14)
 
-## 🌟 未来增强
+### 构建与运行 (Build & Run)
 
-*   **缩放和旋转工具**：实现编辑器中除平移缩放外的更多图像处理工具。
-*   **滤镜和特效**：集成实际的图像处理滤镜和特效功能。
-*   **“为你推荐”模块**：实现首页底部的横向滚动推荐图片流。
-*   **登录模块**： 实现用户注册登录功能。
-*   **UI 优化**：持续优化 UI 细节，使其与“醒图”App 完全一致。
+1.  **克隆项目**
+
+    ```bash
+    git clone https://github.com/Lnhoww/PhotoEditor.git
+    ```
+
+2.  **打开项目**
+    启动 Android Studio，选择 `File > Open`，定位到项目根目录。
+
+3.  **同步 Gradle**
+    等待 Android Studio 自动下载依赖并同步 Gradle 配置。确保网络连接正常（可能需要配置代理以访问 Google Maven 仓库）。
+
+4.  **运行应用**
+
+    * 连接真机（推荐，以获得最佳 OpenGL 性能）或启动 Android 模拟器。
+    * 点击工具栏上的 ▶️ **Run 'app'** 按钮。
+
+### 权限说明
+
+* **Android 13+ (API 33+)**: 应用会请求 `READ_MEDIA_IMAGES` 权限。
+* **Android 12及以下**: 应用会请求 `READ_EXTERNAL_STORAGE` 权限。
+* *注意：首次进入相册页时请允许权限授权，否则无法加载图片。*
+
+## 🤝 贡献 (Contributing)
+
+欢迎提交 Issue 或 Pull Request！
+
+1.  Fork 本仓库
+2.  新建 Feat\_xxx 分支
+3.  提交代码
+4.  新建 Pull Request
 
