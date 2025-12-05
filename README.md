@@ -1,45 +1,97 @@
-# PhotoEditor - 移动图像编辑应用
 
-## 🚀 项目简介
+# 📸 Android High-Performance Photo Editor
 
-PhotoEditor 是一款基于 Jetpack Compose 构建的现代化安卓图像编辑应用，旨在提供一个直观、高效的移动照片处理体验。本项目以知名的“醒图”App 布局为灵感，实现了其首页和相册页的核心 UI 和基础功能。
+这是一个基于 **Kotlin** 和 **Jetpack Compose** 构建的现代化 Android 图片编辑应用。
 
-**核心功能概览：**
-*   **首页 (Home Screen)**：
-    *   动态 Banner：在背景图（xingtu.png）上叠加 GIF 动画（Camera.gif）和扫光特效。
-    *   主功能按钮：快速访问“导入照片”、“相机”、“AI 修人像”、“拼图”等核心功能。
-    *   快速工具栏：一键调用“批量修图”、“画质超清”、“魔法消除”、“智能抠图”等常用工具。
-    *   底部导航栏：提供“修图”、“灵感”、“我的”tab 切换。
-*   **相册页 (Album Screen)**：
-    *   本地媒体库访问：异步拉取设备上的图片和视频缩略图，并以网格形式展示。
-    *   筛选与分类：支持对媒体文件进行类型筛选（如图片、拼图）和按相册分类（如全部照片、Camera）。
-    *   动态权限请求：处理 Android 运行时权限，确保对媒体库的合法访问。
+不同于传统的 View 体系应用，本项目采用了 **混合渲染架构**：使用 **Jetpack Compose** 构建声明式 UI，核心图片渲染层采用 **OpenGL ES 2.0**，实现了在处理高分辨率图片时的 60FPS 流畅预览、无损缩放与高性能裁剪。
 
-## 📸 核心功能截图
+## ✨ 核心功能 (Features)
 
-*   **首页概览**
+* **🚀 高性能渲染引擎**：利用 `GLSurfaceView` 和自定义 Shader，将图片作为纹理处理，实现 0 内存增长的实时缩放、平移预览。
+* **✂️ 智能裁剪系统**：
+    * 手写交互逻辑，支持 8 点触控拖拽（四角 + 四边）。
+    * 包含边界约束算法，防止裁剪框移出边界。
+    * 支持固定比例锁定（1:1, 16:9 等）与自由比例切换。
+    * 支持 **撤销/重做 (Undo/Redo)** 操作历史栈。
+* **🖼️ 沉浸式相册管理**：基于 `ContentResolver` 和协程异步加载系统相册，使用 `Coil` 进行缩略图内存优化。
+* **💾 高质量导出**：编辑过程采用无损预览，仅在导出时使用 `BitmapUtils` 进行物理像素切割，自动纠正 EXIF 旋转信息。
+* **🎨 现代化 UI**：全线采用 Material 3 设计风格，包含流光特效 Banner 和丝滑的转场动画。
 
-*   **相册页概览**
-   
-    
+## 📱 应用截图 (Screenshots)
 
-## 🛠️ 构建与运行说明
+| 首页 (Home) | 系统相册 (Album) | OpenGL 编辑器 (Editor) | 智能裁剪 (Crop) |
+|:---:|:---:|:---:|:---:|
+| <img src="screenshots/home.png" width="200"/> | <img src="screenshots/album.png" width="200"/> | <img src="screenshots/editor.png" width="200"/> | <img src="screenshots/crop.png" width="200"/> |
+| *流光特效与功能入口* | *基于 LazyGrid 的高性能列表* | *双指缩放与实时预览* | *支持撤销/重做与比例锁定* |
 
-### 1. 先决条件
+## 🛠 技术栈 (Tech Stack)
 
-*   **Android Studio Dolphin (2021.1.1) 或更高版本**
-*   **Java Development Kit (JDK) 11 或更高版本**
-*   **物理安卓设备 或 安卓模拟器** (API Level 24 / Android 7.0 或更高)
-*   **Git** (用于克隆仓库)
+* **语言**: Kotlin
+* **UI 框架**: Jetpack Compose (Material3)
+* **架构模式**: MVVM + Single Activity (单向数据流)
+* **图形渲染**: OpenGL ES 2.0 (GLSL Shaders), `GLSurfaceView`, `AndroidView` Interop
+* **图片加载**: Coil (Coroutines Image Loader)
+* **异步处理**: Kotlin Coroutines (Dispatchers.IO / Main)
+* **系统组件**: MediaStore, ContentProvider, ActivityResultContracts (权限管理)
 
+## 📂 项目结构 (Project Structure)
 
+```text
+com.example.photoeditor
+├── MainActivity.kt          // [UI] 路由中心，管理全屏状态分发
+├── MainViewModel.kt         // [ViewModel] 数据持有层，负责异步扫描相册
+├── ui.theme                 // [Theme] Compose 主题配置
+├── screen
+│   ├── AlbumScreen.kt       // [UI] 相册选择页，处理权限与列表展示
+│   ├── EditorScreen.kt      // [UI] 编辑器容器，处理手势与 OpenGL 视图桥接
+│   └── CropScreen.kt        // [UI] 裁剪交互页，包含 Canvas 自绘与手势算法
+├── renderer
+│   └── ImageRenderer.kt     // [Core] OpenGL 渲染引擎，负责纹理映射与 Shader 绘制
+└── utils
+    └── BitmapUtils.kt       // [Utils] 底层图像处理，负责 IO 读写与物理裁剪
+```
 
-## 🌟 未来增强
+## ⚡️ 快速开始 (Getting Started)
 
-*   **“为你推荐”模块**：实现首页底部的横向滚动推荐图片流。
-*   **登录模块**： 实现用户注册登录功能。
-* **更丰富的相册筛选**：增加按日期、地点、人物等高级筛选功能。
-*   **图像编辑功能**：集成实际的图像处理滤镜、裁剪、旋转等功能。
-*   **视频支持**：在相册页中添加视频播放功能。
-*   **UI 优化**：持续优化 UI 细节，使其与“醒图”App 完全一致。
-*   **性能优化**：对大型媒体库的加载和滚动性能进行优化。
+### 环境要求 (Prerequisites)
+
+* **Android Studio**: Hedgehog | 2023.1.1 或更高版本
+* **Kotlin Plugin**: 1.9.0+
+* **JDK**: 17
+* **minSdk**: 24 (Android 7.0)
+* **targetSdk**: 34 (Android 14)
+
+### 构建与运行 (Build & Run)
+
+1.  **克隆项目**
+
+    ```bash
+    git clone https://github.com/Lnhoww/PhotoEditor.git
+    ```
+
+2.  **打开项目**
+    启动 Android Studio，选择 `File > Open`，定位到项目根目录。
+
+3.  **同步 Gradle**
+    等待 Android Studio 自动下载依赖并同步 Gradle 配置。确保网络连接正常（可能需要配置代理以访问 Google Maven 仓库）。
+
+4.  **运行应用**
+
+    * 连接真机（推荐，以获得最佳 OpenGL 性能）或启动 Android 模拟器。
+    * 点击工具栏上的 ▶️ **Run 'app'** 按钮。
+
+### 权限说明
+
+* **Android 13+ (API 33+)**: 应用会请求 `READ_MEDIA_IMAGES` 权限。
+* **Android 12及以下**: 应用会请求 `READ_EXTERNAL_STORAGE` 权限。
+* *注意：首次进入相册页时请允许权限授权，否则无法加载图片。*
+
+## 🤝 贡献 (Contributing)
+
+欢迎提交 Issue 或 Pull Request！
+
+1.  Fork 本仓库
+2.  新建 Feat\_xxx 分支
+3.  提交代码
+4.  新建 Pull Request
+
