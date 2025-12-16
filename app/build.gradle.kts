@@ -64,6 +64,8 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-gif:2.6.0")
 
+    implementation("androidx.navigation:navigation-compose:2.8.5")
+
     // Paging 3 for Compose
     implementation("androidx.paging:paging-runtime-ktx:3.3.0")
     implementation("androidx.paging:paging-compose:3.3.0")
