@@ -45,14 +45,14 @@ import com.example.photoeditor.ui.theme.PhotoEditorTheme
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumScreen(
-    onBack: () -> Unit, // Callback for back navigation
-    onImageClick: (Uri) -> Unit, // Callback for when an image is clicked
+    onBack: () -> Unit, // 回调：当点击返回按钮时执行
+    onImageClick: (Uri) -> Unit, // 回调：当选中一张图时，把图片地址传出去
     viewModel: MainViewModel = viewModel()
 ) {
-    val mediaUris by viewModel.mediaUris.collectAsState()
+    val mediaUris by viewModel.mediaUris.collectAsState()// 通过collectAsState监听信息从MainViewModel中获取到uri地址
     val context = LocalContext.current
 
-    // State for filtering options
+    // UI状态
     var selectedFilter by remember { mutableStateOf("图片") }
     val filters = listOf(
         FilterOption("图片", Icons.Default.Image),
@@ -64,20 +64,21 @@ fun AlbumScreen(
     var selectedCategory by remember { mutableStateOf("全部照片") }
     val categories = listOf("添加画布", "全部照片", "Camera", "醒图", "微信")
 
-    // Request permissions for media access (similar to HomeScreen)
+    // 1. 适配不同 Android 版本
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_IMAGES
     } else {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
 
+    // 2. 注册权限回调
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            viewModel.loadMedia(context)
+            viewModel.loadMedia(context)// 同意了就加载图片
         } else {
-            // Handle permission denied if needed
+            // 暂时不处理
         }
     }
 
@@ -100,7 +101,6 @@ fun AlbumScreen(
         Column(modifier = Modifier
             .padding(innerPadding)
             .fillMaxSize()) {
-            // 1. Filtering Options
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                 filters.forEach { filter ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally,
@@ -122,7 +122,7 @@ fun AlbumScreen(
                 }
             }
 
-            // 2. Album Categories
+            // 2. 横向滚动的胶囊按钮列表
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -130,7 +130,7 @@ fun AlbumScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(categories) { category ->
-                    ChipButton(
+                    ChipButton( //自定义的按钮
                         text = category,
                         selected = selectedCategory == category,
                         onClick = { selectedCategory = category }
@@ -138,8 +138,9 @@ fun AlbumScreen(
                 }
             }
 
-            // 3. Media Grid
+            // 3. 懒加载
             LazyVerticalGrid(
+                // 自适应列数：每张图至少 90dp 宽，屏幕越宽列数越多
                 columns = GridCells.Adaptive(minSize = 90.dp),
                 modifier = Modifier
                     .fillMaxSize()
@@ -149,8 +150,8 @@ fun AlbumScreen(
                     // MODIFIED: Use ImageRequest to load thumbnails
                     val imageRequest = ImageRequest.Builder(LocalContext.current)
                         .data(uri)
-                        .size(256) // Load a smaller version of the image (e.g., 256x256 pixels)
-                        .crossfade(true) // Add a fade-in animation
+                        .size(256) // 性能优化，只加载缩略图
+                        .crossfade(true) // 加载图片淡入的效果
                         .build()
 
                     AsyncImage(
@@ -158,10 +159,10 @@ fun AlbumScreen(
                         contentDescription = null,
                         modifier = Modifier
                             .padding(2.dp)
-                            .aspectRatio(1f)
+                            .aspectRatio(1f)// 强制正方形 1:1
                             .clip(RoundedCornerShape(4.dp))
-                            .clickable { onImageClick(uri) }, // Added clickable modifier
-                        contentScale = ContentScale.Crop
+                            .clickable { onImageClick(uri) },// 点击触发回调
+                        contentScale = ContentScale.Crop// 裁剪填满
                     )
                 }
             }
@@ -191,7 +192,7 @@ fun ChipButton(
 }
 
 data class FilterOption(val name: String, val icon: ImageVector)
-
+//UI预览
 @Preview(showBackground = true)
 @Composable
 fun AlbumScreenPreview() {

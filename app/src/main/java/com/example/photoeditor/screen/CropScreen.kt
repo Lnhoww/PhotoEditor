@@ -64,6 +64,7 @@ fun getAspectRatio(ratioName: String, imgSize: Size): Float? {
 fun CropScreen(
     imageUri: Uri,
     onBack: () -> Unit,
+    filterId: Int,
     onConfirm: (Rect) -> Unit
 ) {
     val context = LocalContext.current
@@ -82,7 +83,7 @@ fun CropScreen(
     // 拖拽交互状态
     var dragHandle by remember { mutableStateOf(DragHandle.NONE) }
     val handleRadius = with(LocalDensity.current) { 12.dp.toPx() }
-    val touchHandleArea = with(LocalDensity.current) { 24.dp.toPx() }
+    val touchHandleArea = with(LocalDensity.current) { 48.dp.toPx() }
     val minCropSize = handleRadius * 2
 
     // --- Undo/Redo 历史栈 ---
@@ -230,21 +231,25 @@ fun CropScreen(
                             modifier = Modifier.fillMaxSize(),
                             update = { view ->
                                 imageRenderer.setImageUri(imageUri, view)
+                                imageRenderer.setFilter(filterId)
                             }
                         )
 
                         // 顶层：绘制裁剪框 & 处理手势
                         Canvas(modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(Unit) {
+                            .pointerInput(Unit) { //监听手指动作
                                 detectDragGestures(
                                     onDragStart = { startOffset ->
-                                        dragStartRect = cropRect
+                                        dragStartRect = cropRect    // 1. 记下起始状态，为了后面做“撤回”功能
                                         dragHandle = when {
+                                            // 计算手指(startOffset)到左上角(cropRect.topLeft)的距离
+                                            // 如果距离小于触摸半径 (touchHandleArea)，就认为你抓住了“左上角”
                                             (startOffset - cropRect.topLeft).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.TOP_LEFT
                                             (startOffset - cropRect.topRight).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.TOP_RIGHT
                                             (startOffset - cropRect.bottomLeft).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.BOTTOM_LEFT
                                             (startOffset - cropRect.bottomRight).getDistanceSquared() < touchHandleArea.pow(2) -> DragHandle.BOTTOM_RIGHT
+                                            // 如果都没按到角，但是按在了矩形内部 -> 认为你想“拖动整张框”
                                             cropRect.contains(startOffset) -> DragHandle.BODY
                                             else -> DragHandle.NONE
                                         }
@@ -538,6 +543,6 @@ fun CropBottomBar(
 @Composable
 fun CropScreenPreview() {
     PhotoEditorTheme {
-        CropScreen(imageUri = Uri.EMPTY, onBack = {}, onConfirm = { _ ->})
+        CropScreen(imageUri = Uri.EMPTY, onBack = {},filterId = 0, onConfirm = { _ ->})
     }
 }

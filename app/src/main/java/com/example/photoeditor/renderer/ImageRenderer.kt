@@ -17,24 +17,49 @@ import javax.microedition.khronos.opengles.GL10
 
 class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
+    // 1. 顶点着色器 (Vertex Shader)
     private val vertexShaderCode =
-        "attribute vec4 vPosition;" +
-                "attribute vec2 vTexCoord;" +
-                "uniform float uScale;" +
-                "uniform vec2 uTranslate;" +
-                "varying vec2 TexCoord;" +
-                "void main() {" +
-                "  gl_Position = vec4(vPosition.xy * uScale + uTranslate, vPosition.zw);" +
-                "  TexCoord = vTexCoord;" +
-                "}"
+        "attribute vec4 vPosition;" +       // 输入：顶点坐标 (矩形的四个角)
+        "attribute vec2 vTexCoord;" +       // 输入：纹理坐标 (对应图片的哪个点)
+        "uniform float uScale;" +           // 输入：用户缩放比例 (由手势控制)
+        "uniform vec2 uTranslate;" +        // 输入：用户平移距离 (由手势控制)
+        "varying vec2 TexCoord;" +          // 输出：传给片段着色器的变量
+        "void main() {" +
+        "  gl_Position = vec4(vPosition.xy * uScale + uTranslate, vPosition.zw);" +
+        "  TexCoord = vTexCoord;" +
+        "}"
 
-    private val fragmentShaderCode =
-        "precision mediump float;" +
-                "uniform sampler2D uTexture;" +
-                "varying vec2 TexCoord;" +
-                "void main() {" +
-                "  gl_FragColor = texture2D(uTexture, TexCoord);" +
-                "}"
+    private val fragmentShaderCode = """
+    precision mediump float;
+    uniform sampler2D uTexture;
+    uniform int uFilterType; // [新增] 接收滤镜类型参数：0=原图, 1=黑白, 2=暖色, 3=冷色
+    varying vec2 TexCoord;
+    
+    void main() {
+        vec4 color = texture2D(uTexture, TexCoord);
+        
+        if (uFilterType == 1) { 
+            // === 黑白滤镜 (Luma转换算法) ===
+            // 人眼对绿光最敏感，所以绿色权重最高 (0.587)
+            float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+            gl_FragColor = vec4(vec3(gray), color.a);
+            
+        } else if (uFilterType == 2) { 
+            // === 暖色/怀旧滤镜 ===
+            // 简单粗暴地增加红色和绿色通道
+            gl_FragColor = vec4(color.r + 0.1, color.g + 0.05, color.b, color.a);
+            
+        } else if (uFilterType == 3) {
+            // === 冷色/胶片滤镜 ===
+            // 增加蓝色通道
+            gl_FragColor = vec4(color.r, color.g, color.b + 0.1, color.a);
+            
+        } else {
+            // === 原图 (Type 0) ===
+            gl_FragColor = color;
+        }
+    }
+""".trimIndent()
 
     private var program: Int = 0
     private lateinit var vertexBuffer: FloatBuffer
@@ -62,6 +87,8 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile private var userScale = 1.0f
     @Volatile private var userTranslateX = 0.0f
     @Volatile private var userTranslateY = 0.0f
+    // 2. 新增一个变量记录当前滤镜
+    @Volatile private var currentFilterType = 0
 
     // --- 状态管理 ---
     private var _imageUri: Uri? = null
@@ -115,6 +142,14 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
         userTranslateX = offset.x
         userTranslateY = offset.y
         surfaceView?.requestRender()
+    }
+
+    // 只要参数变了，就请求重绘
+    fun setFilter(filterType: Int) {
+        if (currentFilterType != filterType) {
+            currentFilterType = filterType
+            surfaceView?.requestRender()
+        }
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -214,6 +249,10 @@ class ImageRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         GLES20.glUniform1f(scaleHandle, userScale)
         GLES20.glUniform2f(translateHandle, userTranslateX, userTranslateY)
+
+        // [新增] 获取 uFilterType 的位置，并赋值
+        val filterTypeHandle = GLES20.glGetUniformLocation(program, "uFilterType")
+        GLES20.glUniform1i(filterTypeHandle, currentFilterType)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
