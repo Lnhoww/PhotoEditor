@@ -41,13 +41,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.photoeditor.ui.theme.PhotoEditorTheme
-
+import androidx.hilt.navigation.compose.hiltViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumScreen(
     onBack: () -> Unit, // 回调：当点击返回按钮时执行
     onImageClick: (Uri) -> Unit, // 回调：当选中一张图时，把图片地址传出去
-    viewModel: MainViewModel = viewModel()
+    viewModel: MainViewModel = hiltViewModel()
 ) {
     val mediaUris by viewModel.mediaUris.collectAsState()// 通过collectAsState监听信息从MainViewModel中获取到uri地址
     val context = LocalContext.current
