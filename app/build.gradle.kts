@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 
+    id("kotlin-kapt")
+    id("com.google.dagger.hilt.android")
 }
 
 android {
@@ -85,4 +87,16 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // [新增 2] Hilt 核心库
+    implementation("com.google.dagger:hilt-android:2.51.1")
+    kapt("com.google.dagger:hilt-android-compiler:2.51.1")
+
+    // [新增 3] Hilt 对 Navigation Compose 的支持 (为了能用 hiltViewModel())
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+
+}
+
+kapt {
+    correctErrorTypes = true
 }
