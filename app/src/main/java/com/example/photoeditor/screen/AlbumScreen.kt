@@ -76,7 +76,7 @@ fun AlbumScreen(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            viewModel.loadMedia(context)// 同意了就加载图片
+            viewModel.loadMedia()// 同意了就加载图片
         } else {
             // 暂时不处理
         }
