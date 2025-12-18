@@ -64,7 +64,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.hilt.navigation.compose.hiltViewModel
-
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.runtime.mutableFloatStateOf
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
@@ -214,14 +216,40 @@ fun EditorScreen(
             )
         }
     ) { innerPadding ->
-        Box(modifier = Modifier
-            .padding(innerPadding)
-            .fillMaxSize()) {
+        // 1. 定义临时状态来控制预览视图的缩放和平移
+        // 这些状态不需要存入 ViewModel，因为它们只是为了“看清楚细节”，不影响最终导出的图片
+        var previewScale by remember { mutableFloatStateOf(1f) }
+        var previewOffsetX by remember { mutableFloatStateOf(0f) }
+        var previewOffsetY by remember { mutableFloatStateOf(0f) }
+
+        Box(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                // 2. [关键] 监听手势
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        // A. 处理缩放 (限制在 1倍 到 10倍 之间)
+                        previewScale = (previewScale * zoom).coerceIn(1f, 10f)
+
+                        // B. 处理平移 (Pan)
+                        // 注意1：OpenGL 的 Y 轴是向上的，而 Android 屏幕 Y 轴是向下的，所以 pan.y 要减去
+                        // 注意2：屏幕像素很大(比如 1080)，OpenGL 坐标很小(-1 到 1)，所以需要除以一个系数来缩小
+                        // 这里 0.001f 是一个经验值，代表灵敏度
+                        val sensitivity = 0.001f
+
+                        // 只有放大时才允许大幅拖动，原大时自动回正这逻辑比较复杂，这里先做自由拖动
+                        previewOffsetX += pan.x * sensitivity
+                        previewOffsetY -= pan.y * sensitivity // Y轴反转
+                    }
+                }
+        ) {
             AndroidView(
                 factory = { ctx ->
                     GLSurfaceView(ctx).apply {
                         setEGLContextClientVersion(2)
                         setRenderer(imageRenderer)
+                        // 设置为按需渲染，节省电量。只有当 requestRender 被调用时才刷新
                         renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
                     }
                 },
@@ -230,33 +258,32 @@ fun EditorScreen(
                     imageRenderer.setImageUri(imageUri, view)
                     imageRenderer.setFilter(currentState.filterId)
 
-                    // === [新增] 连接裁剪预览的线 ===
+                    // === [新增] 将手势数据传给渲染器 ===
+                    imageRenderer.setScale(previewScale)
+                    imageRenderer.setTranslation(previewOffsetX, previewOffsetY)
+
+                    // 裁剪预览逻辑 (保持不变)
                     if (currentState.cropRect != null) {
-                        // 我们需要获取原图尺寸才能计算比例。
-                        // 这里有个小技巧：利用 BitmapFactory 只读取尺寸，不加载图片
                         val options = android.graphics.BitmapFactory.Options().apply {
                             inJustDecodeBounds = true
                         }
-                        android.graphics.BitmapFactory.decodeStream(
-                            context.contentResolver.openInputStream(imageUri), null, options
-                        )
+                        context.contentResolver.openInputStream(imageUri)?.use {
+                            android.graphics.BitmapFactory.decodeStream(it, null, options)
+                        }
                         val imgW = options.outWidth.toFloat()
                         val imgH = options.outHeight.toFloat()
 
                         if (imgW > 0 && imgH > 0) {
-                            // 把像素坐标 (0,0 - 1080,1920) 转换成 (0.0 - 1.0)
-                            val rect = currentState.cropRect
+                            val rect = currentState.cropRect!!
                             val normalizedRect = Rect(
                                 left = rect.left / imgW,
                                 top = rect.top / imgH,
                                 right = rect.right / imgW,
                                 bottom = rect.bottom / imgH
                             )
-                            // 消除警告：调用这个函数
                             imageRenderer.setNormalizedCropRect(normalizedRect)
                         }
                     } else {
-                        // 没裁剪，传 null 还原
                         imageRenderer.setNormalizedCropRect(null)
                     }
                 }
