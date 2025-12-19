@@ -1,97 +1,80 @@
+# 🎨 PhotoEditor - 高性能 Android 图片编辑器
 
-# 📸 Android High-Performance Photo Editor
+![Kotlin](https://img.shields.io/badge/Language-Kotlin-blue.svg)
+![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-green.svg)
+![OpenGL ES](https://img.shields.io/badge/Rendering-OpenGL%20ES%202.0-orange.svg)
+![Hilt](https://img.shields.io/badge/DI-Hilt-purple.svg)
+![Architecture](https://img.shields.io/badge/Architecture-MVVM-yellow.svg)
 
-这是一个基于 **Kotlin** 和 **Jetpack Compose** 构建的现代化 Android 图片编辑应用。
+> 一个基于 **Jetpack Compose** 和 **OpenGL ES 2.0** 构建的现代化 Android 图片编辑应用。
+> 采用 MVVM 架构，专注于**高性能渲染**与**大图内存优化**，实现了媲美商业软件的实时滤镜与交互体验。
 
-不同于传统的 View 体系应用，本项目采用了 **混合渲染架构**：使用 **Jetpack Compose** 构建声明式 UI，核心图片渲染层采用 **OpenGL ES 2.0**，实现了在处理高分辨率图片时的 60FPS 流畅预览、无损缩放与高性能裁剪。
+---
 
-## ✨ 核心功能 (Features)
+## ✨ 功能特性 (Features)
 
-* **🚀 高性能渲染引擎**：利用 `GLSurfaceView` 和自定义 Shader，将图片作为纹理处理，实现 0 内存增长的实时缩放、平移预览。
-* **✂️ 智能裁剪系统**：
-    * 手写交互逻辑，支持 8 点触控拖拽（四角 + 四边）。
-    * 包含边界约束算法，防止裁剪框移出边界。
-    * 支持固定比例锁定（1:1, 16:9 等）与自由比例切换。
-    * 支持 **撤销/重做 (Undo/Redo)** 操作历史栈。
-* **🖼️ 沉浸式相册管理**：基于 `ContentResolver` 和协程异步加载系统相册，使用 `Coil` 进行缩略图内存优化。
-* **💾 高质量导出**：编辑过程采用无损预览，仅在导出时使用 `BitmapUtils` 进行物理像素切割，自动纠正 EXIF 旋转信息。
-* **🎨 现代化 UI**：全线采用 Material 3 设计风格，包含流光特效 Banner 和丝滑的转场动画。
+* **⚡ 硬件加速渲染**: 基于 OpenGL ES 管线，通过自定义 GLSL 着色器实现毫秒级滤镜处理。
+* **🎛️ 专业参数调节**: 支持亮度、对比度、饱和度的实时调节（非叠加图层，基于像素计算）。
+* **✂️ 智能构图裁剪**: 独立的裁剪工具，实现屏幕坐标与纹理坐标的精确映射。
+* **↩️ 双栈撤销/重做**: 健壮的状态管理系统，支持无限历史记录回溯。
+* **👆 丝滑手势交互**: 支持双指无损缩放预览、平移，及**长按对比原图**功能。
+* **🚀 4K/8K 大图支持**: 独有的 Bitmap 内存优化策略，彻底解决高分辨率图片的 OOM（内存溢出）问题。
 
-## 📱 应用截图 (Screenshots)
+---
 
-| 首页 (Home) | 系统相册 (Album) | OpenGL 编辑器 (Editor) | 智能裁剪 (Crop) |
-|:---:|:---:|:---:|:---:|
-| <img src="screenshots/home.png" width="200"/> | <img src="screenshots/album.png" width="200"/> | <img src="screenshots/editor.png" width="200"/> | <img src="screenshots/crop.png" width="200"/> |
-| *流光特效与功能入口* | *基于 LazyGrid 的高性能列表* | *双指缩放与实时预览* | *支持撤销/重做与比例锁定* |
+## 📱 效果演示 (Demo)
+
+| **实时滤镜与调节** | **智能裁剪与缩放** | **撤销重做与对比** |
+|:---:|:---:|:---:|
+| <img src="docs/demo_filter.gif" width="240"/> | <img src="docs/demo_crop.gif" width="240"/> | <img src="docs/demo_compare.gif" width="240"/> |
+
+*(注：请等待图片加载，或查看 docs 目录下的高清演示)*
+
+---
 
 ## 🛠 技术栈 (Tech Stack)
 
-* **语言**: Kotlin
-* **UI 框架**: Jetpack Compose (Material3)
-* **架构模式**: MVVM + Single Activity (单向数据流)
-* **图形渲染**: OpenGL ES 2.0 (GLSL Shaders), `GLSurfaceView`, `AndroidView` Interop
-* **图片加载**: Coil (Coroutines Image Loader)
-* **异步处理**: Kotlin Coroutines (Dispatchers.IO / Main)
-* **系统组件**: MediaStore, ContentProvider, ActivityResultContracts (权限管理)
+* **开发语言**: Kotlin (1.9.0+)
+* **UI 框架**: [Jetpack Compose](https://developer.android.com/jetpack/compose) (Material3) —— 声明式 UI 开发
+* **架构模式**: MVVM (Model-View-ViewModel) + 单一数据源 (UDF)
+* **依赖注入**: [Hilt](https://dagger.dev/hilt/) —— Google 官方推荐的 DI 解决方案
+* **异步处理**: Coroutines (协程) & StateFlow
+* **图形渲染**:
+    * **OpenGL ES 2.0**: 自定义 `GLSurfaceView` 与 Fragment Shaders (片元着色器)
+    * **Matrix Math**: 矩阵变换处理图像坐标映射
+* **单元测试**: JUnit4, MockK (覆盖核心 ViewModel 逻辑)
 
-## 📂 项目结构 (Project Structure)
+---
 
-```text
-com.example.photoeditor
-├── MainActivity.kt          // [UI] 路由中心，管理全屏状态分发
-├── MainViewModel.kt         // [ViewModel] 数据持有层，负责异步扫描相册
-├── ui.theme                 // [Theme] Compose 主题配置
-├── screen
-│   ├── AlbumScreen.kt       // [UI] 相册选择页，处理权限与列表展示
-│   ├── EditorScreen.kt      // [UI] 编辑器容器，处理手势与 OpenGL 视图桥接
-│   └── CropScreen.kt        // [UI] 裁剪交互页，包含 Canvas 自绘与手势算法
-├── renderer
-│   └── ImageRenderer.kt     // [Core] OpenGL 渲染引擎，负责纹理映射与 Shader 绘制
-└── utils
-    └── BitmapUtils.kt       // [Utils] 底层图像处理，负责 IO 读写与物理裁剪
-```
+## 💡 核心技术亮点 (Core Highlights)
 
-## ⚡️ 快速开始 (Getting Started)
+### 1. OpenGL ES 硬件加速渲染 (Hardware Acceleration)
+摒弃了传统的 CPU `Bitmap` 处理方式，采用 **OpenGL ES 2.0** 渲染管线。
+* **自定义 Shader**: 编写原生 **GLSL** 代码，在 GPU 层面并发处理像素点的亮度、对比度和饱和度计算。
+* **性能表现**: 即便处理 4000x3000 分辨率的图片，也能保持 **60fps** 的实时预览帧率，无卡顿。
 
-### 环境要求 (Prerequisites)
+### 2. Bitmap 内存与 OOM 优化 (Memory Optimization)
+针对 Android 平台处理高清大图容易崩溃的痛点，设计了完整的加载策略：
+* **二次采样加载 (Two-Pass Decoding)**: 利用 `inJustDecodeBounds=true` 预读取尺寸，根据屏幕分辨率动态计算 `inSampleSize`。
+* **内存复用**: 严格管理 Bitmap 生命周期，在 OpenGL 纹理上传后及时回收堆内存，确保 App 在低端机型上也能稳定运行。
 
-* **Android Studio**: Hedgehog | 2023.1.1 或更高版本
-* **Kotlin Plugin**: 1.9.0+
-* **JDK**: 17
-* **minSdk**: 24 (Android 7.0)
-* **targetSdk**: 34 (Android 14)
+### 3. 多坐标系映射算法 (Coordinate Mapping)
+解决了 Android View 坐标系（左上角原点）与 OpenGL 纹理坐标系（左下角原点）不一致的问题。
+* 实现了复杂的矩阵变换逻辑，确保用户在屏幕上绘制的“裁剪框”能精确对应到图片的真实像素区域，不受图片缩放和位移的影响。
 
-### 构建与运行 (Build & Run)
+### 4. 现代化的状态管理 (State Management)
+* **单一可信数据源**: 使用 `EditState` 数据类封装裁剪、滤镜、调节参数等所有状态。
+* **不可变性 (Immutability)**: 利用 Kotlin `copy()` 机制配合 `StateFlow`，确保 UI 渲染的线程安全，并轻松实现了撤销/重做功能。
 
-1.  **克隆项目**
+---
 
-    ```bash
-    git clone https://github.com/Lnhoww/PhotoEditor.git
-    ```
+## 🏗 架构设计 (Architecture)
 
-2.  **打开项目**
-    启动 Android Studio，选择 `File > Open`，定位到项目根目录。
+遵循 Google 推荐的现代应用架构指南：
 
-3.  **同步 Gradle**
-    等待 Android Studio 自动下载依赖并同步 Gradle 配置。确保网络连接正常（可能需要配置代理以访问 Google Maven 仓库）。
-
-4.  **运行应用**
-
-    * 连接真机（推荐，以获得最佳 OpenGL 性能）或启动 Android 模拟器。
-    * 点击工具栏上的 ▶️ **Run 'app'** 按钮。
-
-### 权限说明
-
-* **Android 13+ (API 33+)**: 应用会请求 `READ_MEDIA_IMAGES` 权限。
-* **Android 12及以下**: 应用会请求 `READ_EXTERNAL_STORAGE` 权限。
-* *注意：首次进入相册页时请允许权限授权，否则无法加载图片。*
-
-## 🤝 贡献 (Contributing)
-
-欢迎提交 Issue 或 Pull Request！
-
-1.  Fork 本仓库
-2.  新建 Feat\_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
-
+```mermaid
+graph LR
+    A[Repository层] -->|Bitmap数据| B(ViewModel层)
+    B -->|UI State (StateFlow)| C{Compose UI层}
+    C -->|User Intent (事件)| B
+    B -->|IO 操作| A
