@@ -10,8 +10,6 @@ import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
-import kotlin.math.max
-import kotlin.math.roundToInt
 
 object BitmapUtils {
 
@@ -40,12 +38,14 @@ object BitmapUtils {
 
                 // 计算采样率 (inSampleSize)
                 // 比如原图 4000px，MAX 是 1000px，那么 inSampleSize = 4
-                options.inSampleSize = calculateInSampleSize(srcWidth, srcHeight, MAX_WIDTH, MAX_HEIGHT)
+                options.inSampleSize =
+                    calculateInSampleSize(srcWidth, srcHeight, MAX_WIDTH, MAX_HEIGHT)
 
                 // === 第三阶段：真正加载图片 (带缩放) ===
                 options.inJustDecodeBounds = false // 关键：这次要读像素了
                 inputStream = context.contentResolver.openInputStream(uri)
-                val sampledBitmap = BitmapFactory.decodeStream(inputStream, null, options) ?: return@withContext null
+                val sampledBitmap = BitmapFactory.decodeStream(inputStream, null, options)
+                    ?: return@withContext null
 
                 // === 第四阶段：处理旋转 ===
                 // (这一步和你之前的逻辑一样)
@@ -61,7 +61,11 @@ object BitmapUtils {
     }
 
     // 核心功能：根据 Rect 裁剪图片 (也需要防止 OOM)
-    suspend fun cropImage(context: Context, uri: Uri, cropRect: androidx.compose.ui.geometry.Rect): Bitmap? {
+    suspend fun cropImage(
+        context: Context,
+        uri: Uri,
+        cropRect: androidx.compose.ui.geometry.Rect
+    ): Bitmap? {
         return withContext(Dispatchers.IO) {
             try {
                 // 这里为了简单，我们还是复用上面的加载逻辑
@@ -97,11 +101,14 @@ object BitmapUtils {
         }
     }
 
-    fun applyFilter(originalBitmap: Bitmap, filterId: Int): Bitmap {
-        if (filterId == 0) return originalBitmap
-
-        // 使用 ARGB_8888 保证最高画质
-        // 注意：这里创建的新图大小是跟随 originalBitmap 的 (已经被采样过)，所以也是安全的
+    fun applyEffects(
+        originalBitmap: Bitmap,
+        filterId: Int,
+        brightness: Float,
+        contrast: Float,
+        saturation: Float
+    ): Bitmap {
+        // 创建一个可变的 Bitmap 用于绘制
         val newBitmap = Bitmap.createBitmap(
             originalBitmap.width,
             originalBitmap.height,
@@ -109,26 +116,59 @@ object BitmapUtils {
         )
         val canvas = android.graphics.Canvas(newBitmap)
         val paint = android.graphics.Paint()
-        val colorMatrix = android.graphics.ColorMatrix()
 
+        // 1. 初始化基础矩阵
+        val finalMatrix = android.graphics.ColorMatrix()
+
+        // === A. 先应用滤镜 (和 Shader 逻辑保持一致) ===
+        val filterMatrix = android.graphics.ColorMatrix()
         when (filterId) {
-            1 -> colorMatrix.setSaturation(0f) // 黑白
-            2 -> colorMatrix.set(floatArrayOf(
+            1 -> filterMatrix.setSaturation(0f) // 黑白
+            2 -> filterMatrix.set(floatArrayOf( // 暖色
                 1f, 0f, 0f, 0f, 25f,
                 0f, 1f, 0f, 0f, 12f,
                 0f, 0f, 1f, 0f, 0f,
                 0f, 0f, 0f, 1f, 0f
-            )) // 暖色
-            3 -> colorMatrix.set(floatArrayOf(
+            ))
+            3 -> filterMatrix.set(floatArrayOf( // 冷色
                 1f, 0f, 0f, 0f, 0f,
                 0f, 1f, 0f, 0f, 0f,
                 0f, 0f, 1f, 0f, 25f,
                 0f, 0f, 0f, 1f, 0f
-            )) // 冷色
+            ))
         }
+        finalMatrix.postConcat(filterMatrix)
 
-        paint.colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
+        // === B. 应用亮度 (Brightness) ===
+        // Shader: rgb * brightness
+        // Matrix: setScale(r, g, b, a)
+        val brightnessMatrix = android.graphics.ColorMatrix()
+        brightnessMatrix.setScale(brightness, brightness, brightness, 1f)
+        finalMatrix.postConcat(brightnessMatrix)
+
+        // === C. 应用对比度 (Contrast) ===
+        // Shader: (color - 0.5) * contrast + 0.5
+        // Matrix 原理: color * contrast + (127.5 * (1 - contrast))
+        // 因为 Canvas 的 offset 是 0-255，而 Shader 是 0.0-1.0，所以 0.5 对应 127.5
+        val contrastMatrix = android.graphics.ColorMatrix()
+        val offset = 127.5f * (1 - contrast)
+        contrastMatrix.set(floatArrayOf(
+            contrast, 0f, 0f, 0f, offset,
+            0f, contrast, 0f, 0f, offset,
+            0f, 0f, contrast, 0f, offset,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        finalMatrix.postConcat(contrastMatrix)
+
+        // === D. 应用饱和度 (Saturation) ===
+        val saturationMatrix = android.graphics.ColorMatrix()
+        saturationMatrix.setSaturation(saturation)
+        finalMatrix.postConcat(saturationMatrix)
+
+        // 绘制
+        paint.colorFilter = android.graphics.ColorMatrixColorFilter(finalMatrix)
         canvas.drawBitmap(originalBitmap, 0f, 0f, paint)
+
         return newBitmap
     }
 
@@ -138,7 +178,12 @@ object BitmapUtils {
      * 计算采样率
      * 官方文档推荐算法：https://developer.android.com/topic/performance/graphics/load-bitmap
      */
-    private fun calculateInSampleSize(srcWidth: Int, srcHeight: Int, reqWidth: Int, reqHeight: Int): Int {
+    private fun calculateInSampleSize(
+        srcWidth: Int,
+        srcHeight: Int,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
         var inSampleSize = 1
         if (srcHeight > reqHeight || srcWidth > reqWidth) {
             val halfHeight: Int = srcHeight / 2
@@ -160,7 +205,10 @@ object BitmapUtils {
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     val exif = ExifInterface(stream)
-                    val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                    val orientation = exif.getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL
+                    )
                     rotation = when (orientation) {
                         ExifInterface.ORIENTATION_ROTATE_90 -> 90f
                         ExifInterface.ORIENTATION_ROTATE_180 -> 180f
@@ -176,7 +224,8 @@ object BitmapUtils {
         return if (rotation != 0f) {
             val matrix = Matrix().apply { postRotate(rotation) }
             // 创建新的旋转后的 Bitmap
-            val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            val rotatedBitmap =
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
             // 如果生成了新对象，最好回收旧的（可选）
             if (rotatedBitmap != bitmap) {
                 // bitmap.recycle()
