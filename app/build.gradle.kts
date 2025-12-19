@@ -95,6 +95,9 @@ dependencies {
     // [新增 3] Hilt 对 Navigation Compose 的支持 (为了能用 hiltViewModel())
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
+    testImplementation("junit:junit:4.13.2") // 基础测试框架
+    testImplementation("io.mockk:mockk:1.13.8") // Kotlin 专用的 Mock 库
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3") // 协程测试库 (重要)
 }
 
 kapt {
