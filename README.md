@@ -74,7 +74,7 @@
 
 ```mermaid
 graph LR
-    A[Repository层] -->|Bitmap数据| B(ViewModel层)
-    B -->|UI State (StateFlow)| C{Compose UI层}
-    C -->|User Intent (事件)| B
-    B -->|IO 操作| A
+    A[Repository层] -->|"Bitmap数据"| B(ViewModel层)
+    B -->|"UI State (StateFlow)"| C{Compose UI层}
+    C -->|"User Intent (事件)"| B
+    B -->|"IO 操作"| A
